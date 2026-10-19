@@ -1,0 +1,11 @@
+{
+  "title": "RoadRider Vendor App",
+  "description": "RoadRider Vendor Mobile App for Restaurant and Grocery Partners.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

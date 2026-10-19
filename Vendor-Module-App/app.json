@@ -1,0 +1,45 @@
+{
+  "expo": {
+    "name": "RoadRider Vendor",
+    "slug": "roadrider-vendor-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./src/assets/images/roadrider-delivery-logo.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./src/assets/images/roadrider-delivery-logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FFFFFF"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "in.roadrider.vendor"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./src/assets/images/roadrider-delivery-logo.png",
+        "backgroundColor": "#FFFFFF"
+      },
+      "package": "in.roadrider.vendor"
+    },
+    "web": {
+      "favicon": "./public/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "The app accesses your photos to let you upload KYC documents and store photos.",
+          "cameraPermission": "The app accesses your camera to let you take photos of your store and KYC documents."
+        }
+      ],
+      [
+        "expo-document-picker",
+        {
+          "iCloudContainerEnvironment": "Production"
+        }
+      ]
+    ]
+  }
+}

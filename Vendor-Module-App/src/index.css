@@ -1,0 +1,122 @@
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400..700;1,9..40,400..700&family=Poppins:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400;1,600&display=swap");
+
+:root {
+  --warm-grey: #9c9a9a;
+  --terracotta: #a35e47;
+  --black: #000000;
+  --charcoal: #464646;
+  --white: #ffffff;
+  --background: #f8f7f6;
+  font-family: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: var(--black);
+  background-color: var(--background);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  overflow-x: hidden;
+  background-color: var(--background);
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+/* Remove default browser focus orange outlines */
+input:focus,
+textarea:focus,
+select:focus,
+button:focus {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+button {
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+/* Web scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(156, 154, 154, 0.4);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(156, 154, 154, 0.7);
+}
+
+/* Animations for verification status and loaders */
+@keyframes roadriderPulse {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(163, 94, 71, 0.4);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 16px rgba(163, 94, 71, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(163, 94, 71, 0);
+  }
+}
+
+@keyframes roadriderSpin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes roadriderRadarWave {
+  0% {
+    transform: scale(0.8);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 0.3;
+  }
+  100% {
+    transform: scale(1.4);
+    opacity: 0;
+  }
+}
+
+.roadrider-pulsing-badge {
+  animation: roadriderPulse 2.5s infinite cubic-bezier(0.4, 0, 0.6, 1);
+}
+
+.roadrider-radar-wave {
+  animation: roadriderRadarWave 2s infinite ease-out;
+}
+
+.roadrider-spin-indicator {
+  animation: roadriderSpin 1.4s linear infinite;
+}

@@ -29,6 +29,8 @@ import {
   type AutocompleteResult,
   REGIONAL_PLACES,
 } from "../../lib/autocomplete";
+import { usePlacesAutocomplete } from "../../hooks/usePlacesAutocomplete";
+import type { GooglePlaceSuggestion } from "../../services/placesService";
 
 interface PlacesProps {
   mode: PlacesMode;
@@ -117,19 +119,48 @@ export default function Places({ mode }: PlacesProps) {
     return () => clearTimeout(timer);
   }, []);
 
-  // Auto-detect GPS location on mount if in delivery mode
-  useEffect(() => {
-    if (isDelivery) {
-      detectCurrentLocation(false);
-    }
-  }, [isDelivery]);
+  // Typed location mode: do not automatically preselect or fetch GPS on mount.
+  // Coordinates are only populated when the user explicitly selects a suggestion.
+
+  const searchReferenceCoords =
+    previewCoords || pickupPlace.coords || DEFAULT_CENTER;
+
+  // Real Google Places (New) autocomplete hook
+  const {
+    suggestions: googleSuggestions,
+    isSearching: isGoogleSearching,
+    selectPlace,
+  } = usePlacesAutocomplete(search, searchReferenceCoords);
 
   // Compute smart autocomplete suggestions with typo correction and 250km filter
   const smartSuggestions = useMemo(() => {
-    const refCoords =
-      previewCoords || pickupPlace.coords || DEFAULT_CENTER;
-    return searchSmartPlaces(search, refCoords, 250);
-  }, [search, previewCoords, pickupPlace.coords]);
+    return searchSmartPlaces(search, searchReferenceCoords, 250);
+  }, [search, searchReferenceCoords]);
+
+  // Handle selecting a Google Places suggestion
+  const handleSelectGoogleSuggestion = async (suggestion: GooglePlaceSuggestion) => {
+    setIsGeocoding(true);
+    try {
+      const details = await selectPlace(suggestion.placeId);
+      if (details) {
+        const placeObj: Place = {
+          id: `gplace-${suggestion.placeId}`,
+          label: details.displayName || suggestion.primaryText,
+          line: details.formattedAddress || suggestion.fullText,
+          area: suggestion.secondaryText || "Lucknow, Uttar Pradesh",
+          icon: "pin",
+          coords: details.coords,
+        };
+        handleSelectPlace(placeObj);
+      } else {
+        showToast("Could not load place coordinates");
+      }
+    } catch {
+      showToast("Could not select place");
+    } finally {
+      setIsGeocoding(false);
+    }
+  };
 
   // Live map preview update when typing: pans map immediately to top match
   useEffect(() => {
@@ -270,6 +301,33 @@ export default function Places({ mode }: PlacesProps) {
     back();
   };
 
+  // Invalidate stale coordinates when the user edits the typed address
+  const handleSearchChange = (text: string) => {
+    setSearch(text);
+    if (isRide) {
+      if (activeRideField === "pickup") {
+        setPickupPlace((prev) => ({
+          ...prev,
+          id: `typed-pickup-${Date.now()}`,
+          label: text || "Type pickup location",
+          line: text ? "Please select a suggestion below to confirm coordinates" : "",
+          area: "",
+          coords: undefined,
+        }));
+      } else {
+        setDropPlace((prev) => ({
+          id: prev?.id || `typed-drop-${Date.now()}`,
+          label: text || "Type destination",
+          line: text ? "Please select a suggestion below to confirm coordinates" : "",
+          area: "",
+          icon: "pin",
+          coords: undefined,
+        }));
+      }
+      setPreviewCoords(null);
+    }
+  };
+
   // Select place from suggestions or saved places
   const handleSelectPlace = (place: Place | AutocompleteResult) => {
     let targetPlace: Place;
@@ -286,14 +344,26 @@ export default function Places({ mode }: PlacesProps) {
       targetPlace = place;
     }
 
+    // Validate that the suggestion has real, non-null numeric coordinates
+    if (
+      !targetPlace.coords ||
+      typeof targetPlace.coords.lat !== "number" ||
+      typeof targetPlace.coords.lng !== "number" ||
+      isNaN(targetPlace.coords.lat) ||
+      isNaN(targetPlace.coords.lng)
+    ) {
+      showToast("Selected place has invalid coordinates. Please pick another suggestion.");
+      return;
+    }
+
     if (isRide) {
       if (activeRideField === "pickup") {
         setPickupPlace(targetPlace);
-        setPreviewCoords(targetPlace.coords ?? DEFAULT_CENTER);
+        setPreviewCoords(targetPlace.coords);
         setPreviewLabel(targetPlace.label);
         setSearch("");
         // If drop is not yet chosen, automatically transition to choosing drop-off
-        if (!dropPlace) {
+        if (!dropPlace || !dropPlace.coords) {
           setActiveRideField("drop");
           showToast("Pickup selected. Now choose destination.");
         } else {
@@ -301,7 +371,7 @@ export default function Places({ mode }: PlacesProps) {
         }
       } else {
         setDropPlace(targetPlace);
-        setPreviewCoords(targetPlace.coords ?? DEFAULT_CENTER);
+        setPreviewCoords(targetPlace.coords);
         setPreviewLabel(targetPlace.label);
         setSearch("");
         showToast(`Drop-off set to ${targetPlace.label}`);
@@ -336,11 +406,12 @@ export default function Places({ mode }: PlacesProps) {
       if (mode === "courierPickup") {
         setCourier({ pickupId: saved.id });
         showToast("Courier pickup set");
+        back();
       } else {
         setCourier({ dropId: saved.id });
         showToast("Courier drop-off set");
+        push({ name: "courierRouteSelect" });
       }
-      back();
       return;
     }
 
@@ -380,6 +451,33 @@ export default function Places({ mode }: PlacesProps) {
 
   // Confirm both pickup & drop-off locations for ride
   const handleConfirmRideLocations = () => {
+    // Validate pickup coordinates
+    if (
+      !pickupPlace.coords ||
+      typeof pickupPlace.coords.lat !== "number" ||
+      typeof pickupPlace.coords.lng !== "number" ||
+      isNaN(pickupPlace.coords.lat) ||
+      isNaN(pickupPlace.coords.lng)
+    ) {
+      showToast("Please type and select a pickup location from the suggestions.");
+      setActiveRideField("pickup");
+      return;
+    }
+
+    // Validate drop-off coordinates
+    if (
+      !dropPlace ||
+      !dropPlace.coords ||
+      typeof dropPlace.coords.lat !== "number" ||
+      typeof dropPlace.coords.lng !== "number" ||
+      isNaN(dropPlace.coords.lat) ||
+      isNaN(dropPlace.coords.lng)
+    ) {
+      showToast("Please type and select a destination from the suggestions.");
+      setActiveRideField("drop");
+      return;
+    }
+
     // Ensure pickup is saved
     let finalPickupId = pickupPlace.id;
     if (!state.places.some((p) => p.id === finalPickupId)) {
@@ -393,20 +491,17 @@ export default function Places({ mode }: PlacesProps) {
       finalPickupId = added.id;
     }
 
-    // Ensure drop is saved if set
-    let finalDropId: string | null = null;
-    if (dropPlace) {
-      finalDropId = dropPlace.id;
-      if (!state.places.some((p) => p.id === finalDropId)) {
-        const added = addPlace({
-          label: dropPlace.label,
-          line: dropPlace.line,
-          area: dropPlace.area,
-          icon: dropPlace.icon,
-          coords: dropPlace.coords,
-        });
-        finalDropId = added.id;
-      }
+    // Ensure drop is saved
+    let finalDropId = dropPlace.id;
+    if (!state.places.some((p) => p.id === finalDropId)) {
+      const added = addPlace({
+        label: dropPlace.label,
+        line: dropPlace.line,
+        area: dropPlace.area,
+        icon: dropPlace.icon,
+        coords: dropPlace.coords,
+      });
+      finalDropId = added.id;
     }
 
     setRide({
@@ -414,11 +509,7 @@ export default function Places({ mode }: PlacesProps) {
       dropId: finalDropId,
     });
 
-    if (finalDropId) {
-      showToast("📍 Pickup & Drop-off confirmed");
-    } else {
-      showToast("📍 Pickup location confirmed");
-    }
+    showToast("📍 Pickup & Drop-off confirmed");
     back();
   };
 
@@ -584,12 +675,12 @@ export default function Places({ mode }: PlacesProps) {
             }
             placeholderTextColor={colors.muted}
             value={search}
-            onChangeText={setSearch}
+            onChangeText={handleSearchChange}
             style={styles.searchInput}
             autoCorrect={false}
           />
           {search.length > 0 && (
-            <TouchableOpacity onPress={() => setSearch("")} style={styles.clearBtn}>
+            <TouchableOpacity onPress={() => handleSearchChange("")} style={styles.clearBtn}>
               <Icon name="close" size={14} color={colors.muted} />
             </TouchableOpacity>
           )}
@@ -792,103 +883,162 @@ export default function Places({ mode }: PlacesProps) {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Food Section: 1st Option is Current Location with Save for Future Orders */}
-        {isDelivery && (
-          <View style={styles.currentLocationCard}>
-            <TouchableOpacity
-              activeOpacity={0.8}
-              onPress={() => {
-                if (liveGpsPlace) {
-                  handleSelectCurrentLocation(liveGpsPlace);
-                } else {
-                  detectCurrentLocation(true);
-                }
-              }}
-              style={styles.currentLocationRow}
-            >
-              <View style={styles.gpsIconCircle}>
-                {detecting ? (
-                  <ActivityIndicator size="small" color="#ffffff" />
-                ) : (
-                  <Icon name="pin" size={18} color="#ffffff" />
-                )}
-              </View>
-              <View style={styles.currentLocationTextCol}>
-                <View style={styles.badgeRow}>
-                  <Text style={styles.currentLocationTitle}>
-                    {liveGpsPlace
-                      ? liveGpsPlace.label
-                      : "Use current location (GPS)"}
-                  </Text>
-                  <View style={styles.liveTag}>
-                    <Text style={styles.liveTagText}>1st Option</Text>
-                  </View>
+        {/* Real GPS Current Location Card */}
+        <TouchableOpacity
+          activeOpacity={0.8}
+          onPress={() => detectCurrentLocation(true)}
+          style={styles.currentLocationCard}
+        >
+          <View style={styles.currentLocationRow}>
+            <View style={styles.gpsIconCircle}>
+              {detecting ? (
+                <ActivityIndicator size="small" color="#ffffff" />
+              ) : (
+                <Icon name="pin" size={20} color="#ffffff" />
+              )}
+            </View>
+            <View style={styles.currentLocationTextCol}>
+              <View style={styles.badgeRow}>
+                <Text style={styles.currentLocationTitle}>Use Current Location</Text>
+                <View style={styles.liveTag}>
+                  <Text style={styles.liveTagText}>GPS</Text>
                 </View>
-                <Text style={styles.currentLocationSubtitle} numberOfLines={2}>
-                  {liveGpsPlace
-                    ? liveGpsPlace.line || liveGpsPlace.area
-                    : "Detect exact GPS location for fast delivery"}
-                </Text>
               </View>
-              <Icon name="arrow" size={16} color={colors.accent} />
-            </TouchableOpacity>
+              <Text style={styles.currentLocationSubtitle} numberOfLines={1}>
+                {detecting
+                  ? "Accessing device GPS & reverse geocoding..."
+                  : liveGpsPlace
+                  ? `${liveGpsPlace.label} · ${liveGpsPlace.area}`
+                  : "Tap to detect real coordinates & set delivery address"}
+              </Text>
+            </View>
+            <Icon name="arrow" size={16} color={colors.accent} />
+          </View>
+        </TouchableOpacity>
 
-            {/* Save for future orders toggle */}
-            <View style={styles.saveFutureRow}>
-              <View style={styles.saveFutureTextCol}>
-                <Text style={styles.saveFutureTitle}>
-                  Save for future orders
-                </Text>
-                <Text style={styles.saveFutureSub}>
-                  Keep in your saved address book for one-tap checkout
-                </Text>
+        {/* Set Exact Pin on Interactive Map Card */}
+        <TouchableOpacity
+          activeOpacity={0.8}
+          onPress={() => push({ name: "addAddress", mode })}
+          style={styles.pinMapCard}
+        >
+          <View style={styles.currentLocationRow}>
+            <View style={styles.mapPinIconCircle}>
+              <Icon name="pin" size={18} color={colors.accent} />
+            </View>
+            <View style={styles.currentLocationTextCol}>
+              <View style={styles.badgeRow}>
+                <Text style={styles.currentLocationTitle}>Set Exact Pin on Map</Text>
+                <View style={[styles.liveTag, { backgroundColor: "#e8f5e9" }]}>
+                  <Text style={[styles.liveTagText, { color: "#2e7d32" }]}>ACCURATE</Text>
+                </View>
               </View>
-              <Switch
-                value={saveForFutureOrders}
-                onValueChange={setSaveForFutureOrders}
-                trackColor={{ false: "#d1d5db", true: colors.accent }}
-                thumbColor="#ffffff"
-              />
+              <Text style={styles.currentLocationSubtitle}>
+                Drag pin to your doorstep & specify house/flat/landmark
+              </Text>
+            </View>
+            <Icon name="arrow" size={16} color={colors.muted} />
+          </View>
+        </TouchableOpacity>
+
+        {/* Saved Addresses Section (if available) */}
+        {state.places.length > 0 && (
+          <View style={styles.savedSectionWrap}>
+            <Text style={styles.savedSectionTitle}>SAVED ADDRESSES</Text>
+            <View style={styles.savedPlacesRow}>
+              {state.places.map((place) => {
+                const isSelected = state.defaultPlaceId === place.id;
+                return (
+                  <TouchableOpacity
+                    key={place.id}
+                    activeOpacity={0.75}
+                    onPress={() => handleSelectPlace(place)}
+                    style={[
+                      styles.savedPlaceChip,
+                      isSelected && styles.savedPlaceChipSelected,
+                    ]}
+                  >
+                    <Icon
+                      name={place.icon}
+                      size={13}
+                      color={isSelected ? "#ffffff" : colors.ink}
+                    />
+                    <Text
+                      style={[
+                        styles.savedPlaceText,
+                        isSelected && styles.savedPlaceTextSelected,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {place.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           </View>
-        )}
-
-        {/* Ride Section: Quick Current Location Option */}
-        {isRide && (
-          <TouchableOpacity
-            activeOpacity={0.8}
-            onPress={() => detectCurrentLocation(true)}
-            style={styles.gpsRideRow}
-          >
-            <View style={styles.gpsRideIcon}>
-              <Icon name="pin" size={15} color={colors.accent} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.gpsRideTitle}>
-                Set {activeRideField === "pickup" ? "pickup" : "drop-off"} to current GPS
-              </Text>
-              <Text style={styles.gpsRideSub}>
-                Use your device location
-              </Text>
-            </View>
-            <Icon name="arrow" size={14} color={colors.muted} />
-          </TouchableOpacity>
         )}
 
         {/* Autocomplete / Suggested Places */}
         <View style={styles.sectionHeaderRow}>
           <Text style={styles.sectionHeadingTitle}>
             {search.length > 0
-              ? `Search results (${smartSuggestions.length}) · ≤ 250 km`
+              ? googleSuggestions.length > 0
+                ? `Google Places results (${googleSuggestions.length})`
+                : `Search results (${smartSuggestions.length}) · ≤ 250 km`
               : "Suggested places & hubs · ≤ 250 km"}
           </Text>
-          <Text style={styles.sectionHeadingSub}>
-            Typo-corrected
-          </Text>
+          {isGoogleSearching ? (
+            <ActivityIndicator size="small" color={colors.accent} />
+          ) : (
+            <Text style={styles.sectionHeadingSub}>
+              {googleSuggestions.length > 0 ? "Google Verified" : "Typo-corrected"}
+            </Text>
+          )}
         </View>
 
         <View style={styles.suggestionsContainer}>
-          {smartSuggestions.length === 0 ? (
+          {isGeocoding && (
+            <View style={{ paddingVertical: 12, alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 8 }}>
+              <ActivityIndicator size="small" color={colors.accent} />
+              <Text style={{ fontSize: 12, color: colors.ink, fontWeight: "600" }}>Fetching exact place coordinates...</Text>
+            </View>
+          )}
+
+          {googleSuggestions.length > 0 ? (
+            googleSuggestions.map((suggestion) => (
+              <TouchableOpacity
+                key={suggestion.placeId}
+                activeOpacity={0.75}
+                onPress={() => handleSelectGoogleSuggestion(suggestion)}
+                style={styles.suggestionRow}
+                disabled={isGeocoding}
+              >
+                <View style={styles.suggestionIconBox}>
+                  <Icon name="pin" size={16} color={colors.accent} />
+                </View>
+
+                <View style={styles.suggestionDetails}>
+                  <View style={styles.suggestionTitleRow}>
+                    <Text style={styles.suggestionLabel} numberOfLines={1}>
+                      {suggestion.primaryText}
+                    </Text>
+                    <View style={[styles.distanceBadge, { backgroundColor: "#e8f0fe" }]}>
+                      <Text style={[styles.distanceBadgeText, { color: "#1a73e8" }]}>
+                        GOOGLE
+                      </Text>
+                    </View>
+                  </View>
+
+                  <Text style={styles.suggestionAddress} numberOfLines={1}>
+                    {suggestion.secondaryText || suggestion.fullText}
+                  </Text>
+                </View>
+
+                <Icon name="arrow" size={14} color={colors.muted} />
+              </TouchableOpacity>
+            ))
+          ) : smartSuggestions.length === 0 ? (
             <View style={styles.emptyBox}>
               <Text style={styles.emptyTitle}>No locations found within 250 km</Text>
               <Text style={styles.emptySub}>
@@ -1271,11 +1421,70 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: colors.accent,
     padding: 14,
-    marginBottom: 14,
+    marginBottom: 10,
     shadowColor: colors.accent,
     shadowOpacity: 0.1,
     shadowRadius: 8,
     elevation: 3,
+  },
+  pinMapCard: {
+    backgroundColor: "#ffffff",
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: "#e4ded8",
+    padding: 14,
+    marginBottom: 14,
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  mapPinIconCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.accentSoft,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  savedSectionWrap: {
+    marginBottom: 16,
+  },
+  savedSectionTitle: {
+    fontSize: 9.5,
+    fontWeight: "800",
+    color: colors.muted,
+    letterSpacing: 1,
+    marginBottom: 8,
+  },
+  savedPlacesRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  savedPlaceChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 12,
+    backgroundColor: "#ffffff",
+    borderWidth: 1,
+    borderColor: "#e4ded8",
+  },
+  savedPlaceChipSelected: {
+    backgroundColor: colors.ink,
+    borderColor: colors.ink,
+  },
+  savedPlaceText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.ink,
+  },
+  savedPlaceTextSelected: {
+    color: "#ffffff",
   },
   currentLocationRow: {
     flexDirection: "row",

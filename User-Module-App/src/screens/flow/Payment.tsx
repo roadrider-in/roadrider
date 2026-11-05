@@ -15,30 +15,22 @@ import type { Service } from "../../data/demo";
 import { computeBill, rupees } from "../../lib/pricing";
 import { useNav } from "../../navigation/Navigation";
 import { useApp } from "../../state/AppState";
+import { getServiceTheme } from "../../theme/themes";
 
 interface PaymentProps {
   service: Service;
 }
-
-const SERVICE_THEMES: Record<
-  Service,
-  { accent: string; accentSoft: string }
-> = {
-  food: { accent: "#c84b31", accentSoft: "#f8e7e2" },
-  rides: { accent: "#3983f7", accentSoft: "rgba(57, 131, 247, 0.16)" },
-  grocery: { accent: "#318454", accentSoft: "#e5f3e8" },
-  courier: { accent: "#ef801f", accentSoft: "#fff0de" },
-};
 
 export default function Payment({ service }: PaymentProps) {
   const { push } = useNav();
   const { state, itemTotal, placeOrder, placeById, showToast } = useApp();
   const [selectedMethod, setSelectedMethod] = useState<
     "wallet" | "upi" | "card" | "cod"
-  >("wallet");
+  >("upi");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const theme = SERVICE_THEMES[service] ?? SERVICE_THEMES.food;
+  const serviceTheme = getServiceTheme(service);
+  const theme = { accent: serviceTheme.primary, accentSoft: serviceTheme.primarySoft };
   const total = itemTotal(service);
   const bill = computeBill(service, total, state.promos[service] ?? null);
 
@@ -55,6 +47,23 @@ export default function Payment({ service }: PaymentProps) {
 
   const handlePay = async () => {
     if (isSubmitting) return;
+
+    if (!state.authenticated) {
+      showToast("Please sign in to complete your order.");
+      push({ name: "phone" });
+      return;
+    }
+
+    if (service === "rides") {
+      const pickup = placeById(state.ride.pickupId);
+      const drop = placeById(state.ride.dropId);
+      if (!pickup?.coords?.lat || !drop?.coords?.lat) {
+        showToast("Please choose valid pickup and destination locations before booking.");
+        push({ name: "places", mode: "ridePickup" });
+        return;
+      }
+    }
+
     setIsSubmitting(true);
     try {
       let finalMethod = selectedMethod;
@@ -66,21 +75,22 @@ export default function Payment({ service }: PaymentProps) {
           );
           finalMethod = "cod";
         }
-      } else if (selectedMethod === "card" || selectedMethod === "upi") {
-        // In prototype mode, simulate online payment via COD/Wallet order record
-        finalMethod = "cod";
       }
 
       const res = await placeOrder(service, finalMethod as any, destination);
       if (!res.ok) {
-        showToast(res.error);
-        setIsSubmitting(false);
+        showToast(res.error || "Order placement failed.");
         return;
       }
-      setIsSubmitting(false);
-      push({ name: "status", orderId: res.order.id, view: "confirmed" });
+
+      if (service === "rides") {
+        push({ name: "waitingForRider", orderId: res.order.id });
+      } else {
+        push({ name: "status", orderId: res.order.id, view: "confirmed" });
+      }
     } catch (err: any) {
       showToast(err?.message || "Order creation failed.");
+    } finally {
       setIsSubmitting(false);
     }
   };

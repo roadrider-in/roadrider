@@ -2,7 +2,8 @@ import React from "react";
 import { StyleSheet, Text, View, Pressable } from "react-native";
 import Icon from "./Icon";
 import type { Service } from "../data/demo";
-import { colors } from "../theme/tokens";
+import { useI18n, type TranslationKey } from "../lib/i18n";
+import { getServiceTheme } from "../theme/themes";
 
 interface ServiceTabsProps {
   service: Service;
@@ -10,38 +11,54 @@ interface ServiceTabsProps {
 }
 
 export default function ServiceTabs({ service, onSelect }: ServiceTabsProps) {
-  const items: [Service, string, string][] = [
-    ["food", "food", "Food"],
-    ["rides", "car", "Rides"],
-    ["grocery", "bag", "Grocery"],
-    ["courier", "box", "Courier"],
+  const { t } = useI18n();
+
+  const items: [Service, string, string, TranslationKey][] = [
+    ["food", "food", "Food", "service_food"],
+    ["rides", "car", "Rides", "service_rides"],
+    ["grocery", "bag", "Grocery", "service_grocery"],
+    ["courier", "box", "Courier", "service_courier"],
   ];
+
+  const currentTheme = getServiceTheme(service);
 
   return (
     <View style={styles.container}>
-      {items.map(([id, icon, label]) => {
+      {items.map(([id, icon, fallbackLabel, key]) => {
         const isActive = id === service;
+        const label = t(key, fallbackLabel);
+        const itemTheme = getServiceTheme(id);
+
         return (
           <Pressable
             key={id}
             onPress={() => onSelect(id)}
             style={({ pressed }) => [
               styles.tab,
-              isActive && styles.tabActive,
+              isActive && [
+                styles.tabActive,
+                { backgroundColor: itemTheme.serviceTabActiveBg },
+              ],
               pressed && styles.pressed,
             ]}
             accessibilityRole="tab"
             accessibilityState={{ selected: isActive }}
+            accessibilityLabel={label}
           >
             <Icon
               name={icon}
               size={16}
-              color={isActive ? colors.accent : "#99928d"}
+              color={isActive ? "#ffffff" : "#64748b"}
             />
-            <Text style={[styles.label, isActive && styles.labelActive]}>
+            <Text
+              style={[
+                styles.label,
+                isActive && styles.labelActive,
+              ]}
+              numberOfLines={1}
+            >
               {label}
             </Text>
-            {isActive && <View style={styles.activeIndicator} />}
           </Pressable>
         );
       })}
@@ -51,53 +68,48 @@ export default function ServiceTabs({ service, onSelect }: ServiceTabsProps) {
 
 const styles = StyleSheet.create({
   container: {
-    height: 48,
-    marginHorizontal: 14,
-    padding: 4,
-    borderRadius: 14,
-    backgroundColor: "#fffffff0",
+    height: 50,
+    marginHorizontal: 16,
+    padding: 5,
+    borderRadius: 16,
+    backgroundColor: "#ffffff",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    shadowColor: "#19110c",
-    shadowOpacity: 0.15,
-    shadowOffset: { width: 0, height: 8 },
-    shadowRadius: 24,
+    shadowColor: "#000000",
+    shadowOpacity: 0.12,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 16,
     elevation: 4,
-    zIndex: 6,
+    zIndex: 10,
   },
   tab: {
     flex: 1,
     height: 40,
-    borderRadius: 10,
+    borderRadius: 12,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 5,
-    position: "relative",
+    gap: 6,
+    paddingHorizontal: 8,
   },
   tabActive: {
-    backgroundColor: colors.accentSoft,
+    shadowColor: "#000000",
+    shadowOpacity: 0.15,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 6,
+    elevation: 2,
   },
   label: {
-    fontSize: 9,
+    fontSize: 12.5,
     fontWeight: "600",
-    color: "#99928d",
+    color: "#475569",
   },
   labelActive: {
-    color: colors.accent,
+    color: "#ffffff",
     fontWeight: "800",
   },
-  activeIndicator: {
-    position: "absolute",
-    bottom: 2,
-    left: 14,
-    right: 14,
-    height: 2,
-    backgroundColor: colors.accent,
-    borderRadius: 1,
-  },
   pressed: {
-    opacity: 0.8,
+    opacity: 0.85,
   },
 });

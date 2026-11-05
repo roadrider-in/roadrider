@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -6,35 +6,304 @@ import {
   ScrollView,
   TouchableOpacity,
   StatusBar,
+  Animated,
+  Easing,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import UtilityHeader from "../../components/UtilityHeader";
 import Icon from "../../components/Icon";
+import Button from "../../components/Button";
 import { serviceMeta, type Service } from "../../data/demo";
 import { initials, prettyPhone } from "../../lib/format";
 import { rupees } from "../../lib/pricing";
 import { useNav } from "../../navigation/Navigation";
 import { useApp } from "../../state/AppState";
-import { colors } from "../../theme/tokens";
+import { colors, radii } from "../../theme/tokens";
+import { useI18n, SUPPORTED_LANGUAGES } from "../../lib/i18n";
 
+/**
+ * Guest Account View displayed when user is not authenticated.
+ * NO dummy profile data (No "Arjun Khanna", no "+91 98765 43210").
+ * Prompts user to log in or create an account with attractive native animations.
+ */
+function GuestAccountView({
+  onLogin,
+  onBrowse,
+}: {
+  onLogin: () => void;
+  onBrowse: () => void;
+}) {
+  const { t, language, setLanguage } = useI18n();
+  const { setService } = useApp();
+  const { push } = useNav();
+
+  // Subtle floating illustration animation (recreating Figma Make motion style)
+  const floatAnim = useRef(new Animated.Value(0)).current;
+  const pulseScale = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    const floatLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(floatAnim, {
+          toValue: -8,
+          duration: 1800,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(floatAnim, {
+          toValue: 0,
+          duration: 1800,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+
+    const pulseLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseScale, {
+          toValue: 1.05,
+          duration: 1800,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseScale, {
+          toValue: 1,
+          duration: 1800,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+
+    floatLoop.start();
+    pulseLoop.start();
+
+    return () => {
+      floatLoop.stop();
+      pulseLoop.stop();
+    };
+  }, [floatAnim, pulseScale]);
+
+  const benefits = [
+    {
+      icon: "car",
+      title: t("benefit_live_tracking_title", "Live Real-Time Tracking"),
+      desc: t("benefit_live_tracking_desc", "Watch your captain and delivery orders in real time"),
+    },
+    {
+      icon: "pin",
+      title: t("benefit_saved_places_title", "Saved Addresses"),
+      desc: t("benefit_saved_places_desc", "Save Home, Office & favorite spots for instant delivery"),
+    },
+    {
+      icon: "bag",
+      title: t("benefit_reorder_title", "Order History & Easy Reordering"),
+      desc: t("benefit_reorder_desc", "Access invoices and reorder your favorite meals in 1 tap"),
+    },
+    {
+      icon: "shield",
+      title: t("benefit_support_title", "24/7 Priority Support"),
+      desc: t("benefit_support_desc", "Dedicated in-app live chat and immediate ticket resolution"),
+    },
+  ];
+
+  return (
+    <SafeAreaView style={styles.container} edges={["top"]}>
+      <StatusBar barStyle="dark-content" />
+      <UtilityHeader
+        title={t("nav_account", "Account")}
+        subtitle={t("welcome_to_roadrider", "ROADRIDER ACCOUNT")}
+      />
+
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Hero Login-Required Card with Motion Art */}
+        <View style={styles.guestHeroCard}>
+          <Animated.View
+            style={[
+              styles.guestArtContainer,
+              {
+                transform: [{ translateY: floatAnim }, { scale: pulseScale }],
+              },
+            ]}
+          >
+            <View style={styles.guestArtGlow} />
+            <View style={styles.guestArtBadge}>
+              <Icon name="user" size={38} color={colors.accent} />
+            </View>
+          </Animated.View>
+
+          <Text style={styles.guestTitle}>
+            {t("your_roadrider_account", "Your RoadRider Account")}
+          </Text>
+          <Text style={styles.guestSubtitle}>
+            {t(
+              "account_login_sub",
+              "Log in or create an account to access your profile, manage orders, save addresses and enjoy a personalized experience."
+            )}
+          </Text>
+
+          {/* CTA Buttons */}
+          <View style={styles.guestBtnGroup}>
+            <Button onPress={onLogin} accentColor={colors.accent}>
+              <View style={styles.btnContentRow}>
+                <Text style={styles.primaryBtnText}>
+                  {t("login_signup", "Login / Sign Up")}
+                </Text>
+                <Icon name="arrow" size={17} color="#ffffff" />
+              </View>
+            </Button>
+
+            <TouchableOpacity
+              style={styles.guestSecondaryBtn}
+              onPress={onBrowse}
+              activeOpacity={0.8}
+            >
+              <Icon name="home" size={15} color={colors.accent} />
+              <Text style={styles.guestSecondaryBtnText}>
+                {t("browse_as_guest", "Continue Browsing")}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Benefits List */}
+        <View style={styles.benefitsCard}>
+          <Text style={styles.benefitsHeader}>
+            {t("unlock_benefits_title", "WHAT YOU UNLOCK WITH AN ACCOUNT")}
+          </Text>
+          {benefits.map((b, i) => (
+            <View
+              key={i}
+              style={[
+                styles.benefitRow,
+                i < benefits.length - 1 && styles.benefitRowBorder,
+              ]}
+            >
+              <View style={styles.benefitIconBox}>
+                <Icon name={b.icon} size={16} color={colors.accent} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.benefitTitle}>{b.title}</Text>
+                <Text style={styles.benefitDesc}>{b.desc}</Text>
+              </View>
+            </View>
+          ))}
+        </View>
+
+        {/* Language Selection Card */}
+        <View style={styles.languageCard}>
+          <View style={styles.languageHeader}>
+            <Icon name="tag" size={15} color={colors.accent} />
+            <Text style={styles.languageTitle}>
+              {t("lang_settings", "Language / भाषा")}
+            </Text>
+          </View>
+          <View style={styles.languageRow}>
+            {SUPPORTED_LANGUAGES.map((l) => {
+              const isSelected = language === l.name;
+              return (
+                <TouchableOpacity
+                  key={l.code}
+                  style={[styles.langBtn, isSelected && styles.langBtnSelected]}
+                  onPress={() => setLanguage(l.name)}
+                  activeOpacity={0.8}
+                >
+                  <Text
+                    style={[
+                      styles.langBtnText,
+                      isSelected && styles.langBtnTextSelected,
+                    ]}
+                  >
+                    {l.name}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+
+        {/* Explore Services */}
+        <View style={styles.exploreServices}>
+          <Text style={styles.exploreServicesP}>
+            {t("explore_services_title", "Explore RoadRider Services")}
+          </Text>
+          <View style={styles.exploreButtonsRow}>
+            {(["food", "rides", "grocery", "courier"] as Service[]).map((s) => (
+              <TouchableOpacity
+                key={s}
+                style={styles.exploreBtn}
+                onPress={() => {
+                  setService(s);
+                  onBrowse();
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.exploreBtnText}>
+                  {serviceMeta[s].label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+
+        {/* Help & Support Shortcut */}
+        <TouchableOpacity
+          style={styles.guestHelpRow}
+          onPress={() => push({ name: "help" })}
+          activeOpacity={0.8}
+        >
+          <Icon name="shield" size={16} color={colors.muted} />
+          <Text style={styles.guestHelpText}>
+            {t("help_support", "Help & Support")}
+          </Text>
+          <Icon name="arrow" size={14} color={colors.muted} />
+        </TouchableOpacity>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+/**
+ * Authenticated Account Screen with real profile data from Supabase.
+ */
 export default function Account() {
   const { push, switchTab, reset } = useNav();
-  const { state, setService, signOut, showToast } = useApp();
+  const { state, setService, signOut, showToast, openLocationSheet } = useApp();
+  const { language, setLanguage, t } = useI18n();
   const [activityTab, setActivityTab] = useState<"active" | "past">("active");
 
   const isAuth = state.authenticated;
-  const userName = isAuth && state.profile.name ? state.profile.name : "Arjun Khanna";
-  const userPhone =
-    isAuth && state.profile.phone
-      ? `+91 ${prettyPhone(state.profile.phone)}`
-      : "+91 98765 43210";
-  const userInitials =
-    isAuth && state.profile.name ? initials(state.profile.name) : "AK";
 
-  const walletBalance = isAuth ? `${rupees(state.wallet.balance)}.00` : "₹320.00";
+  // If user is guest / not authenticated, show proper Login-Required screen!
+  if (!isAuth) {
+    return (
+      <GuestAccountView
+        onLogin={() => push({ name: "phone" })}
+        onBrowse={() => switchTab("home")}
+      />
+    );
+  }
 
-  const activeOrders = state.orders.filter((o) => o.status < 3);
-  const pastOrders = state.orders.filter((o) => o.status >= 3);
+  // Real authenticated user details from Supabase (NO fake "Arjun Khanna")
+  const userName = state.profile.name || "RoadRider Member";
+  const userPhone = state.profile.phone
+    ? `+91 ${prettyPhone(state.profile.phone)}`
+    : "";
+  const userInitials = state.profile.name
+    ? initials(state.profile.name)
+    : "RR";
+
+  const activeOrders = state.orders.filter(
+    (o) => o.status !== -1 && o.status < 4
+  );
+  const pastOrders = state.orders.filter(
+    (o) => o.status === -1 || o.status >= 4
+  );
   const currentPreview =
     activityTab === "active" ? activeOrders[0] : pastOrders[0];
 
@@ -46,18 +315,17 @@ export default function Account() {
   const handleSignOut = async () => {
     try {
       await signOut();
-      showToast("Signed out successfully");
-      reset([{ name: "phone" }]);
+      showToast(t("signed_out_success", "Signed out successfully"));
     } catch {
-      showToast("Could not sign out");
+      showToast(t("could_not_sign_out", "Could not sign out"));
     }
   };
 
   const menuItems = [
     {
       icon: "pin" as const,
-      label: "Saved addresses",
-      route: { name: "places" as const, mode: "manage" as const },
+      label: t("loc_saved_addresses", "Saved addresses"),
+      onPress: () => openLocationSheet(),
     },
     {
       icon: "card" as const,
@@ -66,12 +334,12 @@ export default function Account() {
     },
     {
       icon: "box" as const,
-      label: "Your orders",
+      label: t("nav_orders", "Your orders"),
       route: { name: "orders" as const },
     },
     {
       icon: "shield" as const,
-      label: "Help & support",
+      label: t("help_support", "Help & support"),
       route: { name: "help" as const },
     },
     {
@@ -84,51 +352,74 @@ export default function Account() {
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       <StatusBar barStyle="dark-content" />
-      <UtilityHeader title="Account" subtitle="PROFILE & SETTINGS" />
+      <UtilityHeader
+        title={t("nav_account", "Account")}
+        subtitle="PROFILE & SETTINGS"
+      />
 
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Profile Card */}
+        {/* Real Profile Card */}
         <View style={styles.profileCard}>
           <View style={styles.avatarLarge}>
             <Text style={styles.avatarLargeText}>{userInitials}</Text>
           </View>
           <View style={styles.profileDetails}>
             <Text style={styles.userName}>{userName}</Text>
-            <Text style={styles.userPhone}>{userPhone}</Text>
+            {Boolean(userPhone) && (
+              <Text style={styles.userPhone}>{userPhone}</Text>
+            )}
           </View>
           <TouchableOpacity
             onPress={() => push({ name: "profile" })}
             activeOpacity={0.7}
           >
-            <Text style={styles.editBtnText}>Edit</Text>
+            <Text style={styles.editBtnText}>{t("edit", "Edit")}</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Figma Wallet Card in Account */}
-        <View style={styles.walletCard}>
-          <View style={styles.walletCardInfo}>
-            <Text style={styles.walletCardSub}>ROADRIDER WALLET</Text>
-            <Text style={styles.walletCardStrong}>{walletBalance}</Text>
-            <Text style={styles.walletCardP}>Available balance</Text>
+        {/* Language Selection Card */}
+        <View style={styles.languageCard}>
+          <View style={styles.languageHeader}>
+            <Icon name="tag" size={15} color={colors.accent} />
+            <Text style={styles.languageTitle}>
+              {t("lang_settings", "Language / भाषा")}
+            </Text>
           </View>
-          <TouchableOpacity
-            style={styles.walletCardBtn}
-            onPress={() => push({ name: "addMoney" })}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.walletCardBtnText}>+ Add money</Text>
-          </TouchableOpacity>
+          <View style={styles.languageRow}>
+            {SUPPORTED_LANGUAGES.map((l) => {
+              const isSelected = language === l.name;
+              return (
+                <TouchableOpacity
+                  key={l.code}
+                  style={[styles.langBtn, isSelected && styles.langBtnSelected]}
+                  onPress={() => setLanguage(l.name)}
+                  activeOpacity={0.8}
+                >
+                  <Text
+                    style={[
+                      styles.langBtnText,
+                      isSelected && styles.langBtnTextSelected,
+                    ]}
+                  >
+                    {l.name}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
         </View>
 
-        {/* Section Heading: Your Activity */}
+        {/* Section Heading: Real Activity */}
         <View style={styles.sectionHeaderRow}>
-          <Text style={styles.sectionTitle}>Your activity</Text>
+          <Text style={styles.sectionTitle}>
+            {t("your_activity", "Your activity")}
+          </Text>
           <TouchableOpacity onPress={() => push({ name: "orders" })}>
-            <Text style={styles.seeAllText}>See all</Text>
+            <Text style={styles.seeAllText}>{t("loc_see_all", "See all")}</Text>
           </TouchableOpacity>
         </View>
 
@@ -147,7 +438,7 @@ export default function Account() {
                 activityTab === "active" && styles.orderTabTextSelected,
               ]}
             >
-              Active
+              Active ({activeOrders.length})
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -163,18 +454,18 @@ export default function Account() {
                 activityTab === "past" && styles.orderTabTextSelected,
               ]}
             >
-              Past
+              Past ({pastOrders.length})
             </Text>
           </TouchableOpacity>
         </View>
 
-        {/* Active Order Item */}
+        {/* Real Order Item or Empty State */}
         {currentPreview ? (
           <TouchableOpacity
             style={styles.activeOrder}
             activeOpacity={0.8}
             onPress={() =>
-              push({ name: "orderDetail", orderId: currentPreview.id })
+              push({ name: "status", orderId: currentPreview.id })
             }
           >
             <View style={styles.orderIcon}>
@@ -189,7 +480,7 @@ export default function Account() {
                     : "food"
                 }
                 size={20}
-                color="#c84b31"
+                color={colors.accent}
               />
             </View>
             <View style={styles.activeOrderInfo}>
@@ -206,31 +497,39 @@ export default function Account() {
               </Text>
               <Text style={styles.activeOrderP}>
                 {currentPreview.status < 3
-                  ? "Arriving in 18 minutes"
+                  ? "In progress · Tap to track"
                   : "Delivered safely"}
               </Text>
             </View>
             <Icon name="arrow" size={16} color={colors.ink} />
           </TouchableOpacity>
         ) : (
-          <TouchableOpacity
-            style={styles.activeOrder}
-            activeOpacity={0.8}
-            onPress={() => push({ name: "orders" })}
-          >
-            <View style={styles.orderIcon}>
-              <Icon name="food" size={20} color="#c84b31" />
+          <View style={styles.emptyOrderBox}>
+            <View style={styles.emptyOrderIconCircle}>
+              <Icon name="box" size={24} color={colors.muted} />
             </View>
-            <View style={styles.activeOrderInfo}>
-              <Text style={styles.activeOrderSmall}>FOOD · ON THE WAY</Text>
-              <Text style={styles.activeOrderStrong}>Royal Biryani House</Text>
-              <Text style={styles.activeOrderP}>Arriving in 18 minutes</Text>
-            </View>
-            <Icon name="arrow" size={16} color={colors.ink} />
-          </TouchableOpacity>
+            <Text style={styles.emptyOrderTitle}>
+              {t("no_orders_yet", "No orders placed yet")}
+            </Text>
+            <Text style={styles.emptyOrderSubtitle}>
+              {t(
+                "no_orders_yet_sub",
+                "Explore top restaurants near you to place your first order."
+              )}
+            </Text>
+            <TouchableOpacity
+              style={styles.emptyOrderBtn}
+              onPress={() => switchTab("home")}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.emptyOrderBtnText}>
+                {t("browse_food", "Browse restaurants")}
+              </Text>
+            </TouchableOpacity>
+          </View>
         )}
 
-        {/* Figma Menu List */}
+        {/* Menu List */}
         <View style={styles.menuList}>
           {menuItems.map((item, index) => {
             const isLast = index === menuItems.length - 1;
@@ -238,7 +537,13 @@ export default function Account() {
               <TouchableOpacity
                 key={item.label}
                 style={[styles.menuButton, !isLast && styles.menuButtonBorder]}
-                onPress={() => push(item.route as any)}
+                onPress={() => {
+                  if ((item as any).onPress) {
+                    (item as any).onPress();
+                  } else if ((item as any).route) {
+                    push((item as any).route);
+                  }
+                }}
                 activeOpacity={0.7}
               >
                 <View style={styles.menuIconSpan}>
@@ -253,7 +558,9 @@ export default function Account() {
 
         {/* Explore Services */}
         <View style={styles.exploreServices}>
-          <Text style={styles.exploreServicesP}>Explore services</Text>
+          <Text style={styles.exploreServicesP}>
+            {t("explore_services_title", "Explore RoadRider Services")}
+          </Text>
           <View style={styles.exploreButtonsRow}>
             {(["food", "rides", "grocery", "courier"] as Service[]).map((s) => (
               <TouchableOpacity
@@ -262,22 +569,22 @@ export default function Account() {
                 onPress={() => handleSelectService(s)}
                 activeOpacity={0.7}
               >
-                <Text style={styles.exploreBtnText}>{serviceMeta[s].label}</Text>
+                <Text style={styles.exploreBtnText}>
+                  {serviceMeta[s].label}
+                </Text>
               </TouchableOpacity>
             ))}
           </View>
         </View>
 
-        {/* Sign Out Button if Authenticated */}
-        {isAuth && (
-          <TouchableOpacity
-            style={styles.signOutBtn}
-            onPress={handleSignOut}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.signOutText}>Sign Out</Text>
-          </TouchableOpacity>
-        )}
+        {/* Sign Out Button */}
+        <TouchableOpacity
+          style={styles.signOutBtn}
+          onPress={handleSignOut}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.signOutText}>Sign Out</Text>
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
@@ -296,84 +603,237 @@ const styles = StyleSheet.create({
     paddingTop: 4,
     paddingBottom: 90,
   },
+  // Guest Account Styles
+  guestHeroCard: {
+    backgroundColor: "#ffffff",
+    borderRadius: 24,
+    padding: 24,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: colors.line,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 2,
+    marginBottom: 16,
+  },
+  guestArtContainer: {
+    width: 88,
+    height: 88,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 16,
+    position: "relative",
+  },
+  guestArtGlow: {
+    position: "absolute",
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: "rgba(200, 75, 49, 0.12)",
+  },
+  guestArtBadge: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: colors.accentSoft,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: "rgba(255, 255, 255, 0.9)",
+  },
+  guestTitle: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: colors.ink,
+    textAlign: "center",
+    marginBottom: 8,
+  },
+  guestSubtitle: {
+    fontSize: 13,
+    color: colors.muted,
+    textAlign: "center",
+    lineHeight: 19,
+    paddingHorizontal: 8,
+    marginBottom: 20,
+  },
+  guestBtnGroup: {
+    width: "100%",
+    gap: 10,
+  },
+  btnContentRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  primaryBtnText: {
+    color: "#ffffff",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  guestSecondaryBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: colors.accent,
+    backgroundColor: "#ffffff",
+  },
+  guestSecondaryBtnText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: colors.accent,
+  },
+  benefitsCard: {
+    backgroundColor: "#ffffff",
+    borderRadius: radii.xl,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: colors.line,
+    marginBottom: 16,
+  },
+  benefitsHeader: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: colors.muted,
+    letterSpacing: 0.8,
+    marginBottom: 14,
+  },
+  benefitRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingVertical: 10,
+  },
+  benefitRowBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: "#f4f2ef",
+  },
+  benefitIconBox: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: colors.accentSoft,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  benefitTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: colors.ink,
+  },
+  benefitDesc: {
+    fontSize: 11,
+    color: colors.muted,
+    marginTop: 2,
+    lineHeight: 15,
+  },
+  guestHelpRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    justifyContent: "center",
+    paddingVertical: 16,
+    marginTop: 10,
+  },
+  guestHelpText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: colors.muted,
+  },
+  // Authenticated Profile Styles
   profileCard: {
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
+    backgroundColor: "#ffffff",
+    padding: 16,
+    borderRadius: radii.xl,
+    borderWidth: 1,
+    borderColor: colors.line,
   },
   avatarLarge: {
     width: 52,
     height: 52,
     borderRadius: 26,
-    backgroundColor: "#c84b31",
-    borderWidth: 2,
-    borderColor: "rgba(255, 255, 255, 0.6)",
+    backgroundColor: colors.accent,
     alignItems: "center",
     justifyContent: "center",
   },
   avatarLargeText: {
     color: "#ffffff",
-    fontSize: 16,
-    fontWeight: "700",
+    fontSize: 17,
+    fontWeight: "800",
   },
   profileDetails: {
     flex: 1,
   },
   userName: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: "800",
     color: colors.ink,
     marginBottom: 2,
   },
   userPhone: {
-    fontSize: 10,
+    fontSize: 12,
     color: colors.muted,
+    fontWeight: "600",
   },
   editBtnText: {
     color: colors.accent,
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: "700",
   },
-  walletCard: {
-    backgroundColor: "#1f1c1a",
-    borderRadius: 19,
-    marginTop: 20,
-    padding: 19,
-    flexDirection: "row",
-    alignItems: "flex-end",
-    justifyContent: "space-between",
-  },
-  walletCardInfo: {
-    flex: 1,
-  },
-  walletCardSub: {
-    fontSize: 7,
-    letterSpacing: 1.2,
-    color: "rgba(255, 255, 255, 0.55)",
-    fontWeight: "700",
-    textTransform: "uppercase",
-  },
-  walletCardStrong: {
-    fontSize: 26,
-    fontWeight: "800",
-    color: "#ffffff",
-    marginTop: 2,
-  },
-  walletCardP: {
-    fontSize: 8,
-    color: "rgba(255, 255, 255, 0.5)",
-    marginTop: 2,
-  },
-  walletCardBtn: {
+  languageCard: {
     backgroundColor: "#ffffff",
-    borderRadius: 9,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    borderRadius: radii.xl,
+    padding: 16,
+    marginTop: 14,
+    borderWidth: 1,
+    borderColor: colors.line,
   },
-  walletCardBtnText: {
-    fontSize: 9,
+  languageHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 10,
+  },
+  languageTitle: {
+    fontSize: 13,
     fontWeight: "700",
     color: colors.ink,
+  },
+  languageRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  langBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: colors.line,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.canvas,
+  },
+  langBtnSelected: {
+    borderColor: colors.accent,
+    backgroundColor: colors.accent,
+  },
+  langBtnText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: colors.ink,
+  },
+  langBtnTextSelected: {
+    color: "#ffffff",
+    fontWeight: "700",
   },
   sectionHeaderRow: {
     flexDirection: "row",
@@ -389,7 +849,7 @@ const styles = StyleSheet.create({
     color: colors.ink,
   },
   seeAllText: {
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: "700",
     color: colors.accent,
   },
@@ -410,29 +870,30 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.accent,
   },
   orderTabText: {
-    fontSize: 10,
+    fontSize: 12,
     color: colors.muted,
+    fontWeight: "600",
   },
   orderTabTextSelected: {
     color: colors.accent,
-    fontWeight: "700",
+    fontWeight: "800",
   },
   activeOrder: {
     backgroundColor: "#ffffff",
-    borderRadius: 15,
+    borderRadius: radii.xl,
     borderWidth: 1,
     borderColor: colors.line,
-    marginTop: 11,
-    padding: 12,
+    marginTop: 12,
+    padding: 14,
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: 12,
   },
   orderIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 11,
-    backgroundColor: "#f7e6e1",
+    width: 44,
+    height: 44,
+    borderRadius: radii.lg,
+    backgroundColor: colors.accentSoft,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -440,25 +901,69 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   activeOrderSmall: {
-    fontSize: 7,
-    fontWeight: "700",
-    color: "#c84b31",
+    fontSize: 10,
+    fontWeight: "800",
+    color: colors.accent,
     letterSpacing: 0.5,
     marginBottom: 2,
   },
   activeOrderStrong: {
-    fontSize: 10,
-    fontWeight: "700",
+    fontSize: 13,
+    fontWeight: "800",
     color: colors.ink,
   },
   activeOrderP: {
-    fontSize: 8,
+    fontSize: 11,
     color: colors.muted,
     marginTop: 2,
   },
+  emptyOrderBox: {
+    backgroundColor: "#ffffff",
+    borderRadius: radii.xl,
+    padding: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  emptyOrderIconCircle: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "#f5f4f0",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 10,
+  },
+  emptyOrderTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: colors.ink,
+    marginBottom: 4,
+  },
+  emptyOrderSubtitle: {
+    fontSize: 12,
+    color: colors.muted,
+    textAlign: "center",
+    lineHeight: 17,
+    marginBottom: 14,
+    paddingHorizontal: 12,
+  },
+  emptyOrderBtn: {
+    backgroundColor: colors.accentSoft,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: radii.md,
+  },
+  emptyOrderBtnText: {
+    color: colors.accent,
+    fontSize: 12,
+    fontWeight: "700",
+  },
   menuList: {
     backgroundColor: "#ffffff",
-    borderRadius: 17,
+    borderRadius: radii.xl,
     borderWidth: 1,
     borderColor: colors.line,
     marginTop: 18,
@@ -467,12 +972,12 @@ const styles = StyleSheet.create({
   menuButton: {
     flexDirection: "row",
     alignItems: "center",
-    padding: 12,
-    gap: 10,
+    padding: 14,
+    gap: 12,
   },
   menuButtonBorder: {
     borderBottomWidth: 1,
-    borderBottomColor: colors.line,
+    borderBottomColor: "#f4f2ef",
   },
   menuIconSpan: {
     width: 24,
@@ -480,7 +985,7 @@ const styles = StyleSheet.create({
   },
   menuLabel: {
     flex: 1,
-    fontSize: 10,
+    fontSize: 13,
     fontWeight: "700",
     color: colors.ink,
     textAlign: "left",
@@ -489,9 +994,11 @@ const styles = StyleSheet.create({
     marginTop: 18,
   },
   exploreServicesP: {
-    fontSize: 9,
+    fontSize: 11,
+    fontWeight: "700",
     color: colors.muted,
     marginBottom: 8,
+    letterSpacing: 0.5,
   },
   exploreButtonsRow: {
     flexDirection: "row",
@@ -506,19 +1013,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: 11,
   },
   exploreBtnText: {
-    fontSize: 9,
+    fontSize: 11,
     fontWeight: "700",
     color: colors.ink,
   },
   signOutBtn: {
     marginTop: 24,
-    paddingVertical: 12,
+    paddingVertical: 14,
     alignItems: "center",
     justifyContent: "center",
+    backgroundColor: "#fef2f2",
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: "#fee2e2",
   },
   signOutText: {
-    color: colors.error,
-    fontSize: 12,
-    fontWeight: "700",
+    color: "#dc2626",
+    fontSize: 13,
+    fontWeight: "800",
   },
 });

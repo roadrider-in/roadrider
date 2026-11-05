@@ -12,8 +12,6 @@ import {
 } from "react";
 import {
   PACKAGE_TYPES,
-  PRODUCTS,
-  RESTAURANTS,
   RIDE_OPTIONS,
   SEED_PLACES,
   serviceMeta,
@@ -21,13 +19,21 @@ import {
   type Service,
 } from "../data/demo";
 import { computeBill, type Bill } from "../lib/pricing";
+import { type LatLng } from "../lib/googleMaps";
 import {
   createBackendOrder,
   fetchOrdersFromBackend,
   subscribeToBackendOrders,
+  isOrderActive,
+  TERMINAL_ORDER_STATUSES,
 } from "../lib/orderService";
 import { signOut as authSignOut, getActiveSession, fetchCustomerProfile } from "../lib/authService";
-import { isSupabaseConfigured } from "../lib/supabase";
+import { supabase, isSupabaseConfigured } from "../lib/supabase";
+import {
+  syncCustomerFavoritesFromBackend,
+  saveCustomerFavoriteToBackend,
+  removeCustomerFavoriteFromBackend,
+} from "../lib/supabaseData";
 
 function mergeBackendOrders(currentOrders: Order[], backendOrders: Order[]): Order[] {
   const backendMap = new Map(backendOrders.map((bo) => [bo.id, bo]));
@@ -38,6 +44,10 @@ function mergeBackendOrders(currentOrders: Order[], backendOrders: Order[]): Ord
         ...o,
         dbId: bo.dbId ?? o.dbId,
         status: bo.status,
+        orderStatus: bo.orderStatus ?? o.orderStatus,
+        restaurantStatus: bo.restaurantStatus ?? o.restaurantStatus,
+        deliveryStatus: bo.deliveryStatus ?? o.deliveryStatus,
+        cancellationReason: bo.cancellationReason ?? o.cancellationReason,
         completedAt: bo.completedAt ?? o.completedAt,
         subtitle: bo.subtitle,
       };
@@ -63,10 +73,11 @@ export type CartLine = {
   subtitle: string;
   price: number;
   qty: number;
+  photo?: string;
 };
 export type DeliveryService = "food" | "grocery";
 
-export type OrderLine = { name: string; qty: number; price: number };
+export type OrderLine = { name: string; qty: number; price: number; photo?: string };
 export type Order = {
   id: string;
   dbId?: string;
@@ -77,11 +88,26 @@ export type Order = {
   bill: Bill;
   payment: string;
   destination: string;
-  /** 0 Confirmed · 1 Picked up · 2 On the way · 3 Delivered/Completed */
+  /** -1 Cancelled · 0 Placed/Confirmed · 1 Preparing · 2 Ready · 3 Handed over / On the way · 4 Delivered */
   status: number;
+  orderStatus?: string;
+  restaurantStatus?: string;
+  deliveryStatus?: string;
+  cancellationReason?: string;
+  prepMinutes?: number;
+  prepDeadline?: string;
+  promisedBy?: string;
+  acceptedAt?: string;
+  readyAt?: string;
+  handedOverAt?: string;
   createdAt: number;
   completedAt?: number;
   rating?: number;
+  partnerId?: string;
+  driverName?: string;
+  driverPhone?: string;
+  driverVehicle?: string;
+  pickupAddress?: string;
   /** Seeded history from the design; never advanced by the simulator. */
   seeded?: boolean;
 };
@@ -110,8 +136,40 @@ export type PersistedState = {
   places: Place[];
   defaultPlaceId: string;
   carts: Record<DeliveryService, { storeId: string | null; lines: CartLine[] }>;
-  ride: { optionId: string; pickupId: string; dropId: string | null };
-  courier: { packageId: string; pickupId: string; dropId: string | null };
+  ride: {
+    optionId: string;
+    pickupId: string;
+    dropId: string | null;
+    pickupCoords?: LatLng;
+    pickupAddress?: string;
+    dropCoords?: LatLng;
+    dropAddress?: string;
+    routePolyline?: string;
+    roadDistanceKm?: number;
+    estimatedDurationMins?: number;
+  };
+  courier: {
+    packageId: string;
+    pickupId: string;
+    dropId: string | null;
+    vehicleType?: "bike" | "3wheeler";
+    payAt?: "pickup" | "drop";
+    category?: string;
+    weight?: string;
+    isFragile?: boolean;
+    receiverName?: string;
+    receiverPhone?: string;
+    senderName?: string;
+    senderPhone?: string;
+    fare?: number;
+    pickupCoords?: LatLng;
+    pickupAddress?: string;
+    dropCoords?: LatLng;
+    dropAddress?: string;
+    routePolyline?: string;
+    roadDistanceKm?: number;
+    estimatedDurationMins?: number;
+  };
   promos: Partial<Record<Service, string>>;
   usedPromos: string[];
   orders: Order[];
@@ -138,29 +196,21 @@ function seedState(): PersistedState {
     isGuest: false,
     profile: { name: "", phone: "", language: "English", profileCompleted: false },
     service: "food",
-    places: SEED_PLACES,
-    defaultPlaceId: "home",
+    places: [],
+    defaultPlaceId: "",
     carts: {
       food: { storeId: null, lines: [] },
       grocery: { storeId: null, lines: [] },
     },
-    ride: { optionId: "auto", pickupId: "home", dropId: "work" },
-    courier: { packageId: "small", pickupId: "home", dropId: "work" },
+    ride: { optionId: "auto", pickupId: "", dropId: null },
+    courier: { packageId: "small", pickupId: "", dropId: null },
     promos: {},
     usedPromos: [],
     orders: [],
     wallet: {
-      balance: 320,
+      balance: 0,
       autoTopUp: false,
-      txns: [
-        {
-          id: "t-init-1",
-          icon: "card",
-          label: "Wallet Top-up",
-          when: Date.now() - 3600000 * 3,
-          amount: 200,
-        },
-      ],
+      txns: [],
     },
     notifications: [],
     favorites: [],
@@ -188,8 +238,11 @@ type PlaceOrderResult =
   | { ok: true; order: Order; dbOrderId?: string }
   | { ok: false; error: string };
 
+export type AuthStatus = "initializing" | "guest" | "authenticated";
+
 type Ctx = {
   state: PersistedState;
+  authStatus: AuthStatus;
   toast: Toast;
   showToast: (text: string) => void;
   isReady: boolean;
@@ -216,6 +269,13 @@ type Ctx = {
   setDefaultPlace: (id: string) => void;
   addPlace: (p: Omit<Place, "id">) => Place;
   removePlace: (id: string) => void;
+  updatePlace: (id: string, patch: Partial<Place>) => void;
+  deletePlace: (id: string) => Promise<void>;
+  syncCustomerAddresses: () => Promise<void>;
+  // Location selection bottom sheet
+  isLocationSheetVisible: boolean;
+  openLocationSheet: () => void;
+  closeLocationSheet: () => void;
   // carts
   addToCart: (
     service: DeliveryService,
@@ -223,6 +283,7 @@ type Ctx = {
     storeId: string
   ) => void;
   changeQty: (service: DeliveryService, id: string, delta: number) => void;
+  clearCart: (service: DeliveryService) => void;
   cartCount: (service: Service) => number;
   itemTotal: (service: Service) => number;
   // ride & courier
@@ -239,6 +300,7 @@ type Ctx = {
   syncOrders: () => Promise<void>;
   setOrderStatus: (id: string, status: number) => void;
   rateOrder: (id: string, rating: number) => void;
+  cancelOrder: (orderId: string, reason?: string) => Promise<{ ok: boolean; error?: string }>;
   // wallet
   addMoney: (amount: number) => void;
   setAutoTopUp: (on: boolean) => void;
@@ -264,6 +326,15 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [isReady, setIsReady] = useState(false);
   const isLoaded = useRef(false);
+  const [isLocationSheetVisible, setIsLocationSheetVisible] = useState(false);
+
+  const openLocationSheet = useCallback(() => {
+    setIsLocationSheetVisible(true);
+  }, []);
+
+  const closeLocationSheet = useCallback(() => {
+    setIsLocationSheetVisible(false);
+  }, []);
 
   // Restore state from AsyncStorage and active Supabase session on initial load
   useEffect(() => {
@@ -276,7 +347,25 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         if (raw) {
           const parsed = JSON.parse(raw) as PersistedState;
           if (parsed && parsed.version === 1) {
-            restored = parsed;
+            // Cold start order sanitization: terminal or expired orders must never reopen active screens
+            const sanitizedOrders = (parsed.orders || []).map((o: Order) => {
+              if (
+                o.orderStatus &&
+                TERMINAL_ORDER_STATUSES.has(o.orderStatus.toLowerCase().trim())
+              ) {
+                return { ...o, status: -1 };
+              }
+              if (
+                o.status >= 0 &&
+                o.status < 4 &&
+                o.createdAt &&
+                Date.now() - o.createdAt > 18 * 3600 * 1000
+              ) {
+                return { ...o, status: -1, orderStatus: "expired" };
+              }
+              return o;
+            });
+            restored = { ...parsed, orders: sanitizedOrders };
           }
         }
       } catch {}
@@ -301,10 +390,28 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         );
 
         const base = restored || seedState();
+        let initialOrders = base.orders;
+
+        if (userPhone || customer?.id) {
+          try {
+            const fetchPromise = fetchOrdersFromBackend(userPhone, customer?.id);
+            const timeoutPromise = new Promise<Order[]>((resolve) =>
+              setTimeout(() => resolve([]), 2000)
+            );
+            const backendOrders = await Promise.race([fetchPromise, timeoutPromise]);
+            if (backendOrders && backendOrders.length > 0) {
+              initialOrders = mergeBackendOrders(base.orders, backendOrders);
+            }
+          } catch (e) {
+            console.warn("[AppState] Startup order sync notice:", e);
+          }
+        }
+
         const authedState: PersistedState = {
           ...base,
           authenticated: true,
           isGuest: false,
+          orders: initialOrders,
           profile: {
             ...base.profile,
             id: customer?.id || base.profile.id,
@@ -325,17 +432,6 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           setState(authedState);
           isLoaded.current = true;
           setIsReady(true);
-        }
-
-        if (userPhone || customer?.id) {
-          fetchOrdersFromBackend(userPhone, customer?.id).then((backendOrders) => {
-            if (mounted && backendOrders && backendOrders.length > 0) {
-              setState((s) => ({
-                ...s,
-                orders: mergeBackendOrders(s.orders, backendOrders),
-              }));
-            }
-          });
         }
         return;
       }
@@ -363,6 +459,13 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           setIsReady(true);
         }
       }
+      // Check first launch for location selection bottom sheet
+      try {
+        const firstLaunchDone = await AsyncStorage.getItem("roadrider.first_launch_done");
+        if (!firstLaunchDone && mounted) {
+          setIsLocationSheetVisible(true);
+        }
+      } catch {}
     }
 
     initializeSession();
@@ -466,8 +569,16 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         const updatedOrder: Order = {
           ...existing,
           status: update.status,
+          orderStatus: update.orderStatus || existing.orderStatus,
+          partnerId: update.raw?.partner_id || existing.partnerId,
+          prepMinutes: update.raw?.prep_minutes ?? existing.prepMinutes,
+          prepDeadline: update.raw?.prep_deadline || update.raw?.promised_by || existing.prepDeadline,
+          promisedBy: update.raw?.promised_by || existing.promisedBy,
+          acceptedAt: update.raw?.accepted_at || existing.acceptedAt,
+          readyAt: update.raw?.ready_at || existing.readyAt,
+          handedOverAt: update.raw?.handed_over_at || existing.handedOverAt,
           completedAt:
-            update.status >= 3 || update.status === -1
+            update.status >= 4 || update.status === -1
               ? update.completedAt || Date.now()
               : existing.completedAt,
         };
@@ -526,6 +637,11 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
     return {
       state,
+      authStatus: !isReady
+        ? "initializing"
+        : state.authenticated
+        ? "authenticated"
+        : "guest",
       toast,
       showToast,
       isReady,
@@ -643,17 +759,19 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           }
         });
       },
-      signOut: () => {
-        authSignOut();
+      signOut: async () => {
+        try {
+          await authSignOut();
+        } catch {}
         setState((s) => ({
           ...s,
           authenticated: false,
-          isGuest: false,
+          isGuest: true,
           profile: {
             id: undefined,
             name: "",
             phone: "",
-            language: "English",
+            language: s.profile.language || "English",
             profileCompleted: false,
           },
           wallet: { balance: 0, autoTopUp: false, txns: [] },
@@ -669,8 +787,163 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       setDefaultPlace: (id) => setState((s) => ({ ...s, defaultPlaceId: id })),
       addPlace: (p) => {
         const place: Place = { ...p, id: `place-${Date.now()}` };
-        setState((s) => ({ ...s, places: [...s.places, place] }));
+        setState((s) => ({
+          ...s,
+          places: [...s.places, place],
+          defaultPlaceId: s.defaultPlaceId || place.id,
+        }));
+
+        // Asynchronously sync to Supabase customer_addresses if authenticated
+        if (state.authenticated && isSupabaseConfigured && supabase) {
+          (async () => {
+            try {
+              const { data: session } = await supabase.auth.getSession();
+              const authUser = session?.session?.user;
+              if (authUser) {
+                const { data: cust } = await supabase
+                  .from("customers")
+                  .select("id")
+                  .eq("auth_user_id", authUser.id)
+                  .maybeSingle();
+
+                if (cust?.id) {
+                  const fullAddr = [p.houseDetails, p.line, p.landmark, p.area]
+                    .filter(Boolean)
+                    .join(", ");
+                  const { data: inserted } = await supabase
+                    .from("customer_addresses")
+                    .insert({
+                      customer_id: cust.id,
+                      latitude: p.coords?.lat ?? null,
+                      longitude: p.coords?.lng ?? null,
+                      full_address: fullAddr,
+                      label: p.label || "Home",
+                      city: p.area?.split(",")[0]?.trim() || "Lucknow",
+                      is_default: false,
+                    })
+                    .select("id")
+                    .maybeSingle();
+
+                  if (inserted?.id) {
+                    setState((curr) => ({
+                      ...curr,
+                      places: curr.places.map((pl) => (pl.id === place.id ? { ...pl, id: inserted.id } : pl)),
+                      defaultPlaceId: curr.defaultPlaceId === place.id ? inserted.id : curr.defaultPlaceId,
+                    }));
+                  }
+                }
+              }
+            } catch (err) {
+              console.warn("[AppState] Error syncing address to customer_addresses:", err);
+            }
+          })();
+        }
         return place;
+      },
+      updatePlace: (id, patch) => {
+        setState((s) => ({
+          ...s,
+          places: s.places.map((p) => (p.id === id ? { ...p, ...patch } : p)),
+        }));
+
+        if (state.authenticated && isSupabaseConfigured && supabase) {
+          (async () => {
+            try {
+              const updatePayload: any = { updated_at: new Date().toISOString() };
+              if (patch.label) updatePayload.label = patch.label;
+              if (patch.line || patch.area) {
+                updatePayload.full_address = [patch.houseDetails, patch.line, patch.landmark, patch.area]
+                  .filter(Boolean)
+                  .join(", ");
+              }
+              if (patch.coords?.lat) updatePayload.latitude = patch.coords.lat;
+              if (patch.coords?.lng) updatePayload.longitude = patch.coords.lng;
+              await supabase.from("customer_addresses").update(updatePayload).eq("id", id);
+            } catch (err) {
+              console.warn("[AppState] Error updating address in customer_addresses:", err);
+            }
+          })();
+        }
+      },
+      deletePlace: async (id) => {
+        setState((s) => {
+          const places = s.places.filter((p) => p.id !== id);
+          const fallback = places[0]?.id ?? "";
+          const swap = (v: string | null) => (v === id ? null : v);
+          return {
+            ...s,
+            places,
+            defaultPlaceId: s.defaultPlaceId === id ? fallback : s.defaultPlaceId,
+            ride: {
+              ...s.ride,
+              pickupId: s.ride.pickupId === id ? fallback : s.ride.pickupId,
+              dropId: swap(s.ride.dropId),
+            },
+            courier: {
+              ...s.courier,
+              pickupId: s.courier.pickupId === id ? fallback : s.courier.pickupId,
+              dropId: swap(s.courier.dropId),
+            },
+          };
+        });
+
+        if (state.authenticated && isSupabaseConfigured && supabase) {
+          try {
+            await supabase.from("customer_addresses").delete().eq("id", id);
+          } catch (err) {
+            console.warn("[AppState] Error deleting address from customer_addresses:", err);
+          }
+        }
+      },
+      syncCustomerAddresses: async () => {
+        if (!isSupabaseConfigured || !supabase) return;
+        try {
+          const { data: session } = await supabase.auth.getSession();
+          const authUser = session?.session?.user;
+          if (!authUser) return;
+
+          const { data: cust } = await supabase
+            .from("customers")
+            .select("id")
+            .eq("auth_user_id", authUser.id)
+            .maybeSingle();
+
+          if (!cust?.id) return;
+
+          const { data: dbAddrs, error } = await supabase
+            .from("customer_addresses")
+            .select("*")
+            .eq("customer_id", cust.id);
+
+          if (error || !dbAddrs || dbAddrs.length === 0) return;
+
+          const mappedPlaces: Place[] = dbAddrs.map((a: any) => {
+            const icon = (a.label || "").toLowerCase() === "home" ? ("home" as const) : ("pin" as const);
+            return {
+              id: a.id,
+              label: a.label || "Home",
+              line: a.full_address || a.city || "Lucknow",
+              area: a.city || "Lucknow, Uttar Pradesh",
+              icon,
+              coords: a.latitude && a.longitude ? { lat: Number(a.latitude), lng: Number(a.longitude) } : undefined,
+              addressType: (a.label || "Home") as any,
+            };
+          });
+
+          setState((curr) => {
+            const existingIds = new Set(mappedPlaces.map((p) => p.id));
+            const filteredCurrent = curr.places.filter((p) => !existingIds.has(p.id));
+            const newPlaces = [...mappedPlaces, ...filteredCurrent];
+            const defaultId = curr.defaultPlaceId || mappedPlaces[0]?.id || "";
+            return {
+              ...curr,
+              places: newPlaces,
+              defaultPlaceId: defaultId,
+            };
+          });
+        } catch (err) {
+          console.warn("[AppState] syncCustomerAddresses error:", err);
+        }
       },
       removePlace: (id) =>
         setState((s) => {
@@ -727,6 +1000,14 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
             },
           };
         }),
+      clearCart: (service) =>
+        setState((s) => ({
+          ...s,
+          carts: {
+            ...s.carts,
+            [service]: { storeId: null, lines: [] },
+          },
+        })),
       cartCount: (service) => {
         if (service === "food" || service === "grocery")
           return state.carts[service].lines.reduce((n, l) => n + l.qty, 0);
@@ -746,16 +1027,15 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           return { ...s, promos };
         }),
       placeOrder: async (service, method, destination) => {
+        if (!state.authenticated) {
+          return {
+            ok: false,
+            error: "Please sign in to place an order.",
+          };
+        }
         const total = itemTotal(service);
         const bill = computeBill(service, total, state.promos[service] ?? null);
         if (total <= 0) return { ok: false, error: "Your cart is empty." };
-        if (method !== "wallet" && method !== "cod") {
-          return {
-            ok: false,
-            error:
-              "Online payments aren't connected in this build. Please pay with Cash on Delivery (COD) or RoadRider Wallet.",
-          };
-        }
         if (method === "wallet" && state.wallet.balance < bill.toPay) {
           return {
             ok: false,
@@ -779,8 +1059,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           const count = cart.lines.reduce((n, l) => n + l.qty, 0);
           title =
             service === "food"
-              ? RESTAURANTS.find((r) => r.id === cart.storeId)?.name ??
-                "Food order"
+              ? "Food order"
               : "Fresh grocery basket";
           subtitle = `${count} item${count > 1 ? "s" : ""} · ${cart.lines
             .map((l) => l.name)
@@ -795,22 +1074,62 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           }`;
           lines = [{ name: `${opt.name} ride`, qty: 1, price: opt.fare }];
         } else {
-          const pkg = PACKAGE_TYPES.find(
-            (p) => p.id === state.courier.packageId
-          )!;
+          const vehicleTitle =
+            state.courier.vehicleType === "3wheeler"
+              ? "Parcel on 3-wheeler"
+              : "Parcel on Bike";
           const to = placeById(state.courier.dropId);
-          title = `Package to ${to?.area.split(",")[0] ?? "destination"}`;
-          subtitle = `${pkg.name} · ${pkg.weight.toLowerCase()}`;
+          const from = placeById(state.courier.pickupId);
+          const weightLabel =
+            state.courier.weight ||
+            (state.courier.vehicleType === "3wheeler" ? "Upto 500 kgs" : "Upto 20 kgs");
+          const payAtLabel =
+            state.courier.payAt === "drop" ? "Pay at Drop" : "Pay at Pickup";
+          title = `${vehicleTitle} to ${to?.area?.split(",")[0] ?? "destination"}`;
+          subtitle = `${vehicleTitle} · ${weightLabel} · ${payAtLabel}`;
+          const fare =
+            state.courier.fare ||
+            (state.courier.vehicleType === "3wheeler" ? 141 : 86);
           lines = [
             {
-              name: `${pkg.name} · ${pkg.weight.toLowerCase()}`,
+              name: `${vehicleTitle} (${weightLabel})`,
               qty: 1,
-              price: pkg.price,
+              price: fare,
             },
           ];
         }
 
-        // Persist order to Supabase backend (orders & order_items)
+        // Resolve exact snapshot delivery place and coordinates
+        const deliveryPlace =
+          service === "rides"
+            ? placeById(state.ride.dropId)
+            : service === "courier"
+            ? placeById(state.courier.dropId)
+            : (placeById(state.defaultPlaceId) ?? state.places[0]);
+
+        const pickupPlace =
+          service === "rides"
+            ? placeById(state.ride.pickupId)
+            : service === "courier"
+            ? placeById(state.courier.pickupId)
+            : null;
+
+        const pickupLat =
+          service === "courier"
+            ? state.courier.pickupCoords?.lat ?? pickupPlace?.coords?.lat ?? null
+            : pickupPlace?.coords?.lat ?? null;
+
+        const pickupLng =
+          service === "courier"
+            ? state.courier.pickupCoords?.lng ?? pickupPlace?.coords?.lng ?? null
+            : pickupPlace?.coords?.lng ?? null;
+
+        const pickupAddr =
+          service === "courier"
+            ? state.courier.pickupAddress || pickupPlace?.line || pickupPlace?.label || null
+            : pickupPlace?.line || pickupPlace?.label || null;
+
+        // Persist order to Supabase backend (orders & order_items) with exact coordinate snapshot
         const backendRes = await createBackendOrder({
           service,
           paymentMethod: method,
@@ -820,6 +1139,38 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           lines,
           storeId,
           customerProfile: state.profile,
+          deliveryLatitude: deliveryPlace?.coords?.lat ?? null,
+          deliveryLongitude: deliveryPlace?.coords?.lng ?? null,
+          deliveryLandmark: deliveryPlace?.landmark ?? null,
+          recipientName:
+            service === "courier" && state.courier.receiverName
+              ? state.courier.receiverName
+              : deliveryPlace?.recipientName || state.profile.name || null,
+          recipientMobile:
+            service === "courier" && state.courier.receiverPhone
+              ? state.courier.receiverPhone
+              : deliveryPlace?.recipientMobile || state.profile.phone || null,
+          pickupAddress: pickupAddr,
+          pickupLatitude: pickupLat,
+          pickupLongitude: pickupLng,
+          routePolyline:
+            service === "courier"
+              ? state.courier.routePolyline || null
+              : service === "rides"
+              ? state.ride.routePolyline || null
+              : null,
+          roadDistanceKm:
+            service === "courier"
+              ? state.courier.roadDistanceKm || null
+              : service === "rides"
+              ? state.ride.roadDistanceKm || null
+              : null,
+          estimatedDurationMins:
+            service === "courier"
+              ? state.courier.estimatedDurationMins || null
+              : service === "rides"
+              ? state.ride.estimatedDurationMins || null
+              : null,
         });
 
         if (!backendRes.ok || !backendRes.order) {
@@ -907,6 +1258,106 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           ...s,
           orders: s.orders.map((o) => (o.id === id ? { ...o, rating } : o)),
         })),
+      cancelOrder: async (orderId: string, reason = "Cancelled by customer") => {
+        if (!orderId) return { ok: false, error: "Missing order ID" };
+
+        const target = state.orders.find(
+          (o) =>
+            o.id === orderId ||
+            (o.dbId && o.dbId === orderId) ||
+            o.id.includes(orderId) ||
+            orderId.includes(o.id)
+        );
+        const cleanDbId = target?.dbId || (!orderId.startsWith("RR-") ? orderId : null);
+
+        // 1. Synchronously update local state & persist immediately
+        setState((prev) => {
+          const nextOrders = prev.orders.map((o) => {
+            const isMatch =
+              o.id === orderId ||
+              (cleanDbId && (o.id === cleanDbId || o.dbId === cleanDbId)) ||
+              (target && (o.id === target.id || o.dbId === target.dbId));
+            if (!isMatch) return o;
+            return {
+              ...o,
+              status: -1,
+              orderStatus: "cancelled",
+              cancellationReason: reason,
+              completedAt: Date.now(),
+            };
+          });
+
+          let nextState: PersistedState = {
+            ...prev,
+            orders: nextOrders,
+          };
+
+          if (target?.service === "rides") {
+            nextState.ride = {
+              ...nextState.ride,
+              dropId: null,
+              routePolyline: undefined,
+              roadDistanceKm: undefined,
+              estimatedDurationMins: undefined,
+            };
+          } else if (target?.service === "courier") {
+            nextState.courier = {
+              ...nextState.courier,
+              dropId: null,
+              dropCoords: undefined,
+              dropAddress: undefined,
+              routePolyline: undefined,
+              roadDistanceKm: undefined,
+              estimatedDurationMins: undefined,
+            };
+          }
+
+          // Force immediate AsyncStorage write so restart NEVER sees active status
+          AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(nextState)).catch(() => {});
+          return nextState;
+        });
+
+        // 2. Persist cancellation to Supabase
+        if (supabase) {
+          try {
+            if (cleanDbId) {
+              await supabase
+                .from("orders")
+                .update({
+                  order_status: "cancelled",
+                  cancellation_reason: reason,
+                  cancelled_at: new Date().toISOString(),
+                })
+                .eq("id", cleanDbId);
+
+              await supabase
+                .from("rides")
+                .update({
+                  status: "cancelled",
+                  cancelled_at: new Date().toISOString(),
+                })
+                .eq("id", cleanDbId);
+            } else {
+              const numOnly = orderId.replace(/\D/g, "");
+              if (numOnly) {
+                await supabase
+                  .from("orders")
+                  .update({
+                    order_status: "cancelled",
+                    cancellation_reason: reason,
+                    cancelled_at: new Date().toISOString(),
+                  })
+                  .eq("order_number", numOnly);
+              }
+            }
+          } catch (err) {
+            console.warn("[AppState:cancelOrder] Supabase sync notice:", err);
+          }
+        }
+
+        showToast("Booking cancelled successfully");
+        return { ok: true };
+      },
       addMoney: (amount) =>
         setState((s) =>
           notify(
@@ -936,19 +1387,36 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           wallet: { ...s.wallet, autoTopUp: on },
         })),
       toggleFavorite: (id) =>
-        setState((s) => ({
-          ...s,
-          favorites: s.favorites.includes(id)
+        setState((s) => {
+          const isFav = s.favorites.includes(id);
+          const nextFavs = isFav
             ? s.favorites.filter((f) => f !== id)
-            : [...s.favorites, id],
-        })),
+            : [...s.favorites, id];
+
+          // Asynchronously sync with Supabase backend if authenticated
+          if (s.authenticated && s.profile.id) {
+            if (isFav) {
+              removeCustomerFavoriteFromBackend(s.profile.id, id).catch(() => {});
+            } else {
+              saveCustomerFavoriteToBackend(s.profile.id, id).catch(() => {});
+            }
+          }
+
+          return {
+            ...s,
+            favorites: nextFavs,
+          };
+        }),
       markAllRead: () =>
         setState((s) => ({
           ...s,
           notifications: s.notifications.map((n) => ({ ...n, read: true })),
         })),
+      isLocationSheetVisible,
+      openLocationSheet,
+      closeLocationSheet,
     };
-  }, [state, toast, showToast]);
+  }, [state, toast, showToast, isLocationSheetVisible, openLocationSheet, closeLocationSheet]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
@@ -958,5 +1426,3 @@ export function useApp() {
   if (!ctx) throw new Error("useApp must be used inside AppStateProvider");
   return ctx;
 }
-
-export { PRODUCTS };

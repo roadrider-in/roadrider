@@ -14,7 +14,8 @@ export const PRESET_COORDS: Record<string, LatLng> = {
   work: { lat: 26.8665, lng: 81.0063, label: "Work (Gomti Nagar)" },
   aminabad: { lat: 26.8437, lng: 80.9262, label: "Aminabad" },
   driver: { lat: 26.854, lng: 80.968, label: "RoadRider Driver" },
-  restaurant: { lat: 26.8512, lng: 80.949, label: "Royal Biryani House" },
+  restaurant: { lat: 26.8512, lng: 80.949, label: "Restaurant Partner" },
+  groceryHub: { lat: 26.853, lng: 80.952, label: "Grocery Partner" },
 };
 
 export const DEFAULT_CENTER: LatLng = PRESET_COORDS.home;

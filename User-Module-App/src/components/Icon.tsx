@@ -23,6 +23,221 @@ export default function Icon({
 
   const renderPaths = () => {
     switch (name) {
+      case "bookmark":
+        return (
+          <Path
+            d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"
+            stroke={strokeColor}
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            fill={fillColor}
+          />
+        );
+      case "share":
+        return (
+          <>
+            <Path
+              d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13"
+              stroke={strokeColor}
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              fill="none"
+            />
+          </>
+        );
+      case "more-vertical":
+        return (
+          <>
+            <Circle cx="12" cy="5" r="1.5" fill={strokeColor} />
+            <Circle cx="12" cy="12" r="1.5" fill={strokeColor} />
+            <Circle cx="12" cy="19" r="1.5" fill={strokeColor} />
+          </>
+        );
+      case "chevron-up":
+        return (
+          <Path
+            d="m18 15-6-6-6 6"
+            stroke={strokeColor}
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        );
+      case "chilli":
+      case "flame":
+        return (
+          <Path
+            d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"
+            stroke={strokeColor}
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            fill={fillColor}
+          />
+        );
+      case "leaf":
+        return (
+          <Path
+            d="M11 20A7 7 0 0 1 4 13c0-4 3.5-7 7-9 3.5 2 7 5 7 9a7 7 0 0 1-7 7Zm0 0v-8"
+            stroke={strokeColor}
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            fill={fillColor}
+          />
+        );
+      case "cutlery":
+        return (
+          <>
+            <Path
+              d="M18 2v20M6 2v7a3 3 0 0 0 3 3v10M3 2v4a3 3 0 0 0 3 3"
+              stroke={strokeColor}
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              fill="none"
+            />
+          </>
+        );
+      case "target":
+        return (
+          <>
+            <Circle
+              cx="12"
+              cy="12"
+              r="7"
+              stroke={strokeColor}
+              strokeWidth="1.8"
+              fill={fillColor}
+            />
+            <Circle
+              cx="12"
+              cy="12"
+              r="2.5"
+              fill={strokeColor}
+            />
+            <Path
+              d="M12 2v3M12 19v3M2 12h3M19 12h3"
+              stroke={strokeColor}
+              strokeWidth="1.8"
+              strokeLinecap="round"
+            />
+          </>
+        );
+      case "history":
+        return (
+          <>
+            <Path
+              d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"
+              stroke={strokeColor}
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              fill="none"
+            />
+            <Path
+              d="M3 3v5h5M12 7v5l3 3"
+              stroke={strokeColor}
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </>
+        );
+      case "bike":
+        return (
+          <>
+            <Circle cx="5.5" cy="17.5" r="3.5" stroke={strokeColor} strokeWidth="1.8" fill="none" />
+            <Circle cx="18.5" cy="17.5" r="3.5" stroke={strokeColor} strokeWidth="1.8" fill="none" />
+            <Path
+              d="M15 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2ZM12 17.5V14l-3-3 4-3 2 3h3.5"
+              stroke={strokeColor}
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </>
+        );
+      case "auto":
+        return (
+          <>
+            <Path
+              d="M5 16h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2H9L5 13v1a2 2 0 0 0 2 2Z"
+              stroke={strokeColor}
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              fill="none"
+            />
+            <Circle cx="7.5" cy="17.5" r="2.5" stroke={strokeColor} strokeWidth="1.8" fill="none" />
+            <Circle cx="16.5" cy="17.5" r="2.5" stroke={strokeColor} strokeWidth="1.8" fill="none" />
+            <Path d="M9 7v6M14 7v6" stroke={strokeColor} strokeWidth="1.5" strokeLinecap="round" />
+          </>
+        );
+      case "chevron-down":
+        return (
+          <Path
+            d="m6 9 6 6 6-6"
+            stroke={strokeColor}
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        );
+      case "map":
+        return (
+          <Path
+            d="M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3V6ZM9 3v15M15 6v15"
+            stroke={strokeColor}
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            fill="none"
+          />
+        );
+      case "users":
+        return (
+          <>
+            <Path
+              d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"
+              stroke={strokeColor}
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              fill="none"
+            />
+            <Circle cx="9" cy="7" r="4" stroke={strokeColor} strokeWidth="1.8" fill="none" />
+            <Path
+              d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"
+              stroke={strokeColor}
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </>
+        );
+      case "badge-percent":
+        return (
+          <>
+            <Path
+              d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z"
+              stroke={strokeColor}
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              fill={fillColor}
+            />
+            <Path
+              d="m15 9-6 6M9 9h.01M15 15h.01"
+              stroke="#ffffff"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </>
+        );
       case "pin":
         return (
           <>
@@ -448,6 +663,77 @@ export default function Icon({
         return (
           <Path
             d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5Z"
+            stroke={strokeColor}
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            fill={fillColor}
+          />
+        );
+      case "truck":
+        return (
+          <>
+            <Path
+              d="M1 3h15v13H1zM16 8h4l3 3v5h-7V8z"
+              stroke={strokeColor}
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              fill="none"
+            />
+            <Circle cx="5.5" cy="18.5" r="2.5" stroke={strokeColor} strokeWidth="1.8" fill={fillColor} />
+            <Circle cx="18.5" cy="18.5" r="2.5" stroke={strokeColor} strokeWidth="1.8" fill={fillColor} />
+          </>
+        );
+      case "sliders":
+        return (
+          <>
+            <Path
+              d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"
+              stroke={strokeColor}
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </>
+        );
+      case "microphone":
+      case "mic":
+        return (
+          <>
+            <Path
+              d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"
+              stroke={strokeColor}
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              fill={fillColor}
+            />
+            <Path
+              d="M19 10v1a7 7 0 0 1-14 0v-1M12 18v4M8 22h8"
+              stroke={strokeColor}
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </>
+        );
+      case "scan":
+        return (
+          <>
+            <Path
+              d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"
+              stroke={strokeColor}
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </>
+        );
+      case "crown":
+        return (
+          <Path
+            d="m2 4 3 12h14l3-12-6 7-4-7-4 7-6-7zm3 16h14v2H5v-2z"
             stroke={strokeColor}
             strokeWidth="1.8"
             strokeLinecap="round"

@@ -1,6 +1,6 @@
 import type { Service } from "../data/demo";
 
-export type TabName = "home" | "navcart" | "wallet" | "orders" | "account";
+export type TabName = "home" | "rides" | "navcart" | "orders" | "account";
 export type PlacesMode =
   | "delivery"
   | "ridePickup"
@@ -15,12 +15,21 @@ export type RouteSpec =
   | { name: "otp"; phone: string }
   | { name: TabName }
   | { name: "mainTabs"; screen?: TabName }
-  | { name: "detail"; service: "food" | "grocery" | "courier"; storeId?: string }
+  | { name: "detail"; service: "food" | "grocery" | "courier"; storeId?: string; highlightItemId?: string }
+  | { name: "ridePickupDrop" }
+  | { name: "ridePickupPoint" }
   | { name: "rideConfirm" }
+  | { name: "courierDropSearch" }
+  | { name: "courierRouteSelect" }
+  | { name: "courierSearching"; orderId: string }
+  | { name: "courierTracking"; orderId: string }
   | { name: "cart"; service: Service }
   | { name: "address"; service: Service }
   | { name: "payment"; service: Service }
   | { name: "status"; orderId: string; view?: "confirmed" | "tracking" }
+  | { name: "waitingForRider"; orderId: string }
+  | { name: "rideTracking"; orderId: string }
+  | { name: "noInternet" }
   | { name: "complete"; orderId: string }
   | { name: "notifications" }
   | { name: "places"; mode: PlacesMode }
@@ -44,12 +53,21 @@ export type RootStackParamList = {
   phone: undefined;
   otp: { phone: string };
   mainTabs: { screen?: TabName } | undefined;
-  detail: { service: "food" | "grocery" | "courier"; storeId?: string };
+  detail: { service: "food" | "grocery" | "courier"; storeId?: string; highlightItemId?: string };
+  ridePickupDrop: undefined;
+  ridePickupPoint: undefined;
   rideConfirm: undefined;
+  courierDropSearch: undefined;
+  courierRouteSelect: undefined;
+  courierSearching: { orderId: string };
+  courierTracking: { orderId: string };
   cart: { service: Service };
   address: { service: Service };
   payment: { service: Service };
   status: { orderId: string; view?: "confirmed" | "tracking" };
+  waitingForRider: { orderId: string };
+  rideTracking: { orderId: string };
+  noInternet: undefined;
   complete: { orderId: string };
   notifications: undefined;
   places: { mode: PlacesMode };
@@ -71,8 +89,8 @@ export type RootStackParamList = {
 
 export type BottomTabParamList = {
   home: undefined;
+  rides: undefined;
   navcart: undefined;
-  wallet: undefined;
   orders: undefined;
   account: undefined;
 };

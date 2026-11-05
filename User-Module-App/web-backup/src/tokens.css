@@ -1,0 +1,56 @@
+/* RoadRider design tokens. The brand palette lives here and nowhere else. */
+:root {
+  /* Brand palette */
+  --terracotta: #A35E47;
+  --black: #000000;
+  --charcoal: #464646;
+  --grey: #9C9A9A;
+  --bg: #F8F7F5;
+  --card: #FFFFFF;
+  --beige: #EFE7E2;
+  --border: #E5E5E5;
+  --navy: #17212B;
+
+  /* Service accents */
+  --food: #A35E47;
+  --rides: #3B82F6;
+  --grocery: #3A8F5B;
+  --courier: #F59E0B;
+
+  /* Semantic */
+  --success: #22C55E;
+  --warning: #F59E0B;
+  --error: #EF4444;
+  --info: #3B82F6;
+
+  /* Derived tints and shades (always mixed from the palette above) */
+  --terracotta-soft: color-mix(in srgb, var(--terracotta) 14%, var(--card));
+  --terracotta-tint: color-mix(in srgb, var(--terracotta) 40%, var(--card));
+  --terracotta-deep: color-mix(in srgb, var(--terracotta) 60%, var(--black));
+  --food-dark: color-mix(in srgb, var(--terracotta) 8%, var(--black));
+  --food-dark-2: color-mix(in srgb, var(--terracotta) 22%, var(--black));
+  --food-dark-3: color-mix(in srgb, var(--terracotta) 40%, var(--black));
+  --rides-soft: color-mix(in srgb, var(--rides) 14%, var(--card));
+  --rides-deep: color-mix(in srgb, var(--rides) 55%, var(--navy));
+  --navy-2: color-mix(in srgb, var(--rides) 12%, var(--navy));
+  --navy-3: color-mix(in srgb, var(--rides) 25%, var(--navy));
+  --navy-4: color-mix(in srgb, var(--rides) 38%, var(--navy));
+  --grocery-soft: color-mix(in srgb, var(--grocery) 14%, var(--card));
+  --grocery-pale: color-mix(in srgb, var(--grocery) 6%, var(--card));
+  --grocery-line: color-mix(in srgb, var(--grocery) 22%, var(--card));
+  --grocery-deep: color-mix(in srgb, var(--grocery) 65%, var(--black));
+  --courier-soft: color-mix(in srgb, var(--courier) 14%, var(--card));
+  --courier-pale: color-mix(in srgb, var(--courier) 7%, var(--card));
+  --courier-line: color-mix(in srgb, var(--courier) 25%, var(--card));
+  --courier-deep: color-mix(in srgb, var(--courier) 70%, var(--black));
+  --success-soft: color-mix(in srgb, var(--success) 14%, var(--card));
+  --warning-soft: color-mix(in srgb, var(--warning) 16%, var(--card));
+  --error-soft: color-mix(in srgb, var(--error) 12%, var(--card));
+  --info-soft: color-mix(in srgb, var(--info) 12%, var(--card));
+  --success-deep: color-mix(in srgb, var(--success) 70%, var(--black));
+  --ink-soft: color-mix(in srgb, var(--charcoal) 40%, var(--black));
+  --grey-soft: color-mix(in srgb, var(--grey) 35%, var(--card));
+  --grey-deep: color-mix(in srgb, var(--grey) 70%, var(--charcoal));
+  --canvas-outer: color-mix(in srgb, var(--beige) 80%, var(--grey));
+  --border-strong: color-mix(in srgb, var(--border) 65%, var(--grey));
+}

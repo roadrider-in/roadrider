@@ -142,6 +142,15 @@ export async function verifyOtp(
         const authUser = data.user;
         const session = data.session;
 
+        if (session) {
+          try {
+            await supabase.auth.setSession({
+              access_token: session.access_token,
+              refresh_token: session.refresh_token,
+            });
+          } catch {}
+        }
+
         // Synchronize customer profile in `customers` table
         const customer = await syncCustomerRecord(authUser.id, raw10, fullName);
 
@@ -164,59 +173,23 @@ export async function verifyOtp(
         error?.message
       );
 
-      // Resilient fallback: If carrier SMS was delayed/undelivered or testing with fixed code (e.g. 123456),
-      // look up or sync customer in Supabase database so the user is never blocked
-      console.log(`[AuthService] Fetching customer profile from Supabase for ${raw10}...`);
-      const existingCustomer = await fetchCustomerProfile(raw10);
-      const customer =
-        existingCustomer ||
-        (await syncCustomerRecord(`auth-${raw10}`, raw10, fullName));
-
       return {
-        success: true,
-        message: "Successfully signed in!",
-        user: {
-          id: customer?.auth_user_id || customer?.id || `user-${raw10}`,
-          phone: raw10,
-          fullName: customer?.full_name || fullName || "RoadRider Customer",
-        },
-        customer,
-        session: null,
-        mode: "live",
+        success: false,
+        error: error?.message || "Invalid or expired verification code. Please check and try again.",
       };
     } catch (err: any) {
       console.error("[AuthService] Exception verifying OTP:", err);
-      const existingCustomer = await fetchCustomerProfile(raw10);
       return {
-        success: true,
-        message: "Successfully signed in!",
-        user: {
-          id: existingCustomer?.id || `user-${raw10}`,
-          phone: raw10,
-          fullName: existingCustomer?.full_name || fullName || "RoadRider Customer",
-        },
-        customer: existingCustomer,
-        mode: "live",
+        success: false,
+        error: err?.message || "Verification code validation failed.",
       };
     }
   }
 
-  // Fallback demo mode
+  // Fallback if Supabase is unconfigured
   return {
-    success: true,
-    message: "Demo login successful!",
-    user: {
-      id: "demo-user-1",
-      phone: raw10,
-      fullName: fullName || "RoadRider Customer",
-    },
-    customer: {
-      id: "demo-cust-1",
-      phone: `+91 ${raw10}`,
-      full_name: fullName || null,
-      wallet_balance: 0,
-    },
-    mode: "demo",
+    success: false,
+    error: "Authentication service is not configured.",
   };
 }
 

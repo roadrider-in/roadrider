@@ -1,41 +1,51 @@
-This is an Expo/React Native mobile application. Prioritize mobile-first patterns, performance, and cross-platform compatibility.
+# RoadRider User App — React Native & Expo
 
-## Expo has changed — do not trust your training data
+Full native mobile application built with **React Native 0.86** + **Expo 57** + **React Navigation 7** + **Supabase**.
 
-Expo ships breaking changes every SDK release. APIs you remember are likely renamed, moved, or removed. Before writing any code that touches an Expo, EAS, or React Native API:
+## Running the Application
 
-1. Read the major version of the `expo` package in `package.json`.
-2. Fetch the matching versioned docs: `https://docs.expo.dev/versions/v<major>.0.0/`
-3. For anything else, fetch https://docs.expo.dev/llms.txt — an index of all Expo docs with corrections to common LLM misconceptions. Follow its links to the specific page you need; never answer from memory.
-
-## Commands
-
-Use `bunx` instead of `npx` if the project uses bun (`bun.lock` present).
-
+Start the Expo development server:
 ```bash
-npx expo install <package>  # ALWAYS use instead of npm/yarn/pnpm/bun add — resolves SDK-compatible versions
-npx expo start              # start the dev server
-npx expo lint               # lint
-npx tsc --noEmit            # typecheck
-npx expo-doctor             # diagnose dependency and config issues
-npx expo install --fix      # fix incompatible package versions
+npx expo start
+```
+or
+```bash
+npm start
 ```
 
-Run lint and typecheck before declaring any task done.
+### Options:
+- Press `a` in terminal to open in Android Emulator
+- Press `i` to open in iOS Simulator
+- Scan the displayed QR code with **Expo Go** on physical Android or iOS device
+- Run `npm run tunnel` to launch an ngrok tunnel for external network testing
 
-## Navigation & Routing
+## Build & Release with EAS Build
 
-- Use **Expo Router** for all navigation. Routes live in `src/app/` — every file there is a screen, `_layout.tsx` files define navigators. Keep non-route code (components, hooks, utils) outside `src/app/`.
-- Import `Link`, `router`, and `useLocalSearchParams` from `expo-router`.
-- Docs: https://docs.expo.dev/router/introduction.md
+Ensure EAS CLI is installed: `npm install -g eas-cli`
 
-## Building with EAS
+### 1. Standalone Android APK (Direct phone install / testing):
+```bash
+eas build --platform android --profile preview
+```
 
-Use EAS to build, sign, and submit the app in the cloud (`eas build`, `eas submit`) and to ship over-the-air updates (`eas update`) — no local Xcode or Android Studio required. Run EAS CLI as `bunx eas-cli <command>` in Bun projects, or `npx eas-cli@latest <command>` otherwise; substitute that for bare `eas` in docs examples.
-Docs: https://docs.expo.dev/eas/index.md
+### 2. Android App Bundle (AAB for Google Play Store):
+```bash
+eas build --platform android --profile production
+```
 
-## Rules
+### 3. iOS TestFlight / App Store Release:
+```bash
+eas build --platform ios --profile production
+```
 
-- If `ios/` and `android/` directories do not exist, they are generated (Continuous Native Generation). Never create or edit them by hand — configure native behavior in `app.json` and config plugins.
-- Expo Go only includes its bundled native modules. After adding a library with native code, the app needs a development build: `npx expo run:ios|android` locally, or `eas build --profile development`.
-- Prefer recommended Expo modules over third-party libraries, and check your available skills before adding dependencies. Docs: https://docs.expo.dev/versions/latest/index.md
+## Project Architecture
+
+- `App.tsx` - App entry wrapped with `SafeAreaProvider`, `I18nProvider`, and `AppStateProvider`
+- `src/navigation/RootNavigator.tsx` - Stack and Tab navigators for 30+ native screens
+- `src/screens/` - Native screens (Auth, Home verticals, Cart, Orders, Live Tracking, Support)
+- `src/state/AppState.tsx` - Central reactive app state with AsyncStorage persistence and Supabase synchronization
+- `src/lib/i18n.tsx` - Multi-language translation engine (English & Hindi)
+- `src/lib/supabase.ts` - Supabase client with real-time channels
+- `src/components/` - Native UI components (`Icon`, `Button`, `Logo`, `GoogleMap`, `CancelOrderModal`, `ReviewModal`)
+- `app.json` / `app.config.js` - Dynamic Expo config with location permissions and Google Maps API keys
+- `eas.json` - Multi-environment build profiles for development, preview APK, and production app bundle

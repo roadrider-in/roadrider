@@ -28,6 +28,17 @@ export interface CreateOrderParams {
     name?: string;
     phone?: string;
   };
+  deliveryLatitude?: number | null;
+  deliveryLongitude?: number | null;
+  deliveryLandmark?: string | null;
+  recipientName?: string | null;
+  recipientMobile?: string | null;
+  pickupAddress?: string | null;
+  pickupLatitude?: number | null;
+  pickupLongitude?: number | null;
+  routePolyline?: string | null;
+  roadDistanceKm?: number | null;
+  estimatedDurationMins?: number | null;
 }
 
 export interface CreateOrderResult {
@@ -75,6 +86,7 @@ export async function createBackendOrder(
   const dbOrderStatus = "placed";
 
   let createdDbOrderId: string | null = null;
+  let resolvedStoreName: string | null = null;
 
   // 3. If Supabase is configured, persist to database
   if (isSupabaseConfigured && supabase) {
@@ -85,22 +97,41 @@ export async function createBackendOrder(
         resolvedStoreId = storeId;
       }
 
-      if (!resolvedStoreId) {
-        // Match appropriate store from `stores` table
+      // For rides and courier, no store_id is needed
+      if (service === "rides" || service === "courier") {
+        resolvedStoreId = null;
+      } else if (!resolvedStoreId) {
+        // Match appropriate approved store from `stores` table
         const businessType = service === "grocery" ? "grocery" : "restaurant";
         const { data: storeRows } = await supabase
           .from("stores")
-          .select("id")
+          .select(`
+            id,
+            vendors!inner (
+              onboarding_status
+            )
+          `)
           .eq("business_type", businessType)
+          .in("vendors.onboarding_status", ["approved", "live"])
+          .neq("status", "SUSPENDED")
+          .eq("is_active", true)
           .limit(1);
 
         if (storeRows && storeRows.length > 0) {
           resolvedStoreId = storeRows[0].id;
         } else {
-          // Fallback to any active store
+          // Fallback to any approved store
           const { data: anyStore } = await supabase
             .from("stores")
-            .select("id")
+            .select(`
+              id,
+              vendors!inner (
+                onboarding_status
+              )
+            `)
+            .in("vendors.onboarding_status", ["approved", "live"])
+            .neq("status", "SUSPENDED")
+            .eq("is_active", true)
             .limit(1);
           if (anyStore && anyStore.length > 0) {
             resolvedStoreId = anyStore[0].id;
@@ -108,61 +139,194 @@ export async function createBackendOrder(
         }
       }
 
-      // Resolve customer_id from `customers` table
-      let resolvedCustomerId: string | null = null;
-      if (customerProfile?.id && isUuid(customerProfile.id)) {
-        resolvedCustomerId = customerProfile.id;
+      // Check if store exists, is approved, and is active & not suspended
+      if (resolvedStoreId) {
+        const { data: storeCheck } = await supabase
+          .from("stores")
+          .select(`
+            id,
+            status,
+            is_active,
+            store_name,
+            vendors (
+              id,
+              onboarding_status
+            )
+          `)
+          .eq("id", resolvedStoreId)
+          .maybeSingle();
+
+        if (storeCheck) {
+          resolvedStoreName = storeCheck.store_name;
+        }
+
+        const vendorStatus = (storeCheck?.vendors as any)?.onboarding_status;
+        const isApproved = vendorStatus === "approved" || vendorStatus === "live";
+
+        if (storeCheck && (!isApproved || storeCheck.status === "SUSPENDED" || storeCheck.is_active === false)) {
+          console.warn("[orderService] Store is unapproved, suspended or inactive:", storeCheck.store_name);
+          return {
+            ok: false,
+            error: !isApproved
+              ? `Store "${storeCheck.store_name || "selected store"}" is not an approved vendor and cannot accept customer orders.`
+              : `Store "${storeCheck.store_name || "selected store"}" is currently suspended by RoadRider Operations and cannot accept orders.`,
+          };
+        }
+      } else if (service === "food" || service === "grocery") {
+        return {
+          ok: false,
+          error: "No approved and active stores are currently available to service this order.",
+        };
       }
 
-      const rawPhone = customerProfile?.phone || "";
+      // 1. Verify that user has an active, authenticated Supabase GoTrue session
+      const { data: sessionData } = await supabase.auth.getSession();
+      const authUser = sessionData?.session?.user;
+
+      if (!authUser) {
+        return {
+          ok: false,
+          error: "Authentication required. Please sign in to place your order.",
+        };
+      }
+
+      const rawPhone = customerProfile?.phone || authUser.phone || "";
       const cleanDigits = rawPhone.replace(/[^0-9]/g, "");
       const raw10 = cleanDigits.slice(-10);
+      const customerPhoneFormatted = raw10.length === 10
+        ? `+91 ${raw10.slice(0, 5)} ${raw10.slice(5)}`
+        : rawPhone || "";
 
-      if (!resolvedCustomerId && raw10.length === 10) {
-        const p1 = raw10.slice(0, 5);
-        const p2 = raw10.slice(5);
-        const { data: custRows } = await supabase
-          .from("customers")
-          .select("id, phone")
-          .or(`phone.ilike.%${p1}%${p2}%,phone.ilike.%${raw10}%,phone.eq.${rawPhone}`)
-          .limit(1);
+      // 2. Resolve customer_id from `customers` table tied to this authenticated authUser.id
+      let resolvedCustomerId: string | null = null;
 
-        if (custRows && custRows.length > 0) {
-          resolvedCustomerId = custRows[0].id;
+      // Check if customer record exists for this auth_user_id
+      const { data: custByAuth } = await supabase
+        .from("customers")
+        .select("id, auth_user_id, phone, full_name")
+        .eq("auth_user_id", authUser.id)
+        .maybeSingle();
+
+      if (custByAuth?.id) {
+        resolvedCustomerId = custByAuth.id;
+      } else {
+        // If not found by auth_user_id, check if customer profile has a valid ID
+        if (customerProfile?.id && isUuid(customerProfile.id)) {
+          const { data: custById } = await supabase
+            .from("customers")
+            .select("id, auth_user_id")
+            .eq("id", customerProfile.id)
+            .maybeSingle();
+
+          if (custById) {
+            if (!custById.auth_user_id) {
+              await supabase
+                .from("customers")
+                .update({ auth_user_id: authUser.id, updated_at: new Date().toISOString() })
+                .eq("id", custById.id);
+            }
+            resolvedCustomerId = custById.id;
+          }
+        }
+
+        // Match by customer phone and link auth_user_id
+        if (!resolvedCustomerId && raw10.length === 10) {
+          const { data: custByPhone } = await supabase
+            .from("customers")
+            .select("id, auth_user_id, phone")
+            .ilike("phone", `%${raw10}%`)
+            .maybeSingle();
+
+          if (custByPhone?.id) {
+            const { data: updatedCust } = await supabase
+              .from("customers")
+              .update({ auth_user_id: authUser.id, updated_at: new Date().toISOString() })
+              .eq("id", custByPhone.id)
+              .select("id, auth_user_id")
+              .maybeSingle();
+
+            resolvedCustomerId = updatedCust?.id || custByPhone.id;
+          }
+        }
+
+        // If still no customer record, create one for this authenticated user
+        if (!resolvedCustomerId) {
+          const { data: newCust, error: createCustErr } = await supabase
+            .from("customers")
+            .insert({
+              auth_user_id: authUser.id,
+              phone: customerPhoneFormatted,
+              full_name: customerProfile?.name || authUser.user_metadata?.full_name || "RoadRider Customer",
+              status: "active",
+              city: "Lucknow",
+              is_active: true,
+              risk_level: "low",
+            })
+            .select("id")
+            .maybeSingle();
+
+          if (!createCustErr && newCust) {
+            resolvedCustomerId = newCust.id;
+          }
         }
       }
 
-      // If still not resolved, attempt to match through active GoTrue session auth_user_id
       if (!resolvedCustomerId) {
-        try {
-          const { data: sessionData } = await supabase.auth.getSession();
-          const authUserId = sessionData?.session?.user?.id;
-          if (authUserId && isUuid(authUserId)) {
-            const { data: custByAuth } = await supabase
-              .from("customers")
-              .select("id")
-              .eq("auth_user_id", authUserId)
-              .limit(1);
-            if (custByAuth && custByAuth.length > 0) {
-              resolvedCustomerId = custByAuth[0].id;
-            }
-          }
-        } catch {}
+        return {
+          ok: false,
+          error: "Could not link order to customer account. Please try signing in again.",
+        };
       }
 
       const totalItemCount = lines.reduce((sum, l) => sum + (l.qty || 1), 0);
-      const customerPhoneFormatted = raw10.length === 10
-        ? `+91 ${raw10.slice(0, 5)} ${raw10.slice(5)}`
-        : rawPhone || "+91 98765 43210";
 
-      // Prepare order payload
-      const orderPayload = {
+      // Validate coordinates strictly (-90 to 90, -180 to 180)
+      const isValidLat =
+        typeof params.deliveryLatitude === "number" &&
+        !isNaN(params.deliveryLatitude) &&
+        params.deliveryLatitude >= -90 &&
+        params.deliveryLatitude <= 90;
+
+      const isValidLng =
+        typeof params.deliveryLongitude === "number" &&
+        !isNaN(params.deliveryLongitude) &&
+        params.deliveryLongitude >= -180 &&
+        params.deliveryLongitude <= 180;
+
+      const snapshotLat = isValidLat ? params.deliveryLatitude : null;
+      const snapshotLng = isValidLng ? params.deliveryLongitude : null;
+
+      // Construct complete delivery address with landmark
+      let finalDeliveryAddress = destination;
+      if (
+        params.deliveryLandmark &&
+        params.deliveryLandmark.trim().length > 0 &&
+        !finalDeliveryAddress.toLowerCase().includes(params.deliveryLandmark.toLowerCase())
+      ) {
+        finalDeliveryAddress = `${finalDeliveryAddress} (Landmark: ${params.deliveryLandmark.trim()})`;
+      }
+
+      const recipientDisplayName =
+        params.recipientName?.trim() ||
+        customerProfile?.name ||
+        authUser.user_metadata?.full_name ||
+        "RoadRider Customer";
+
+      const recipientContactPhone =
+        params.recipientMobile?.trim() || customerPhoneFormatted;
+
+      // Prepare immutable order snapshot payload
+      const orderPayload: any = {
         store_id: resolvedStoreId,
         customer_id: resolvedCustomerId,
-        customer_name: customerProfile?.name || "RoadRider Customer",
-        customer_phone: customerPhoneFormatted,
-        delivery_address: destination,
+        customer_name: recipientDisplayName,
+        customer_phone: recipientContactPhone,
+        delivery_address: finalDeliveryAddress,
+        delivery_latitude: snapshotLat,
+        delivery_longitude: snapshotLng,
         order_status: dbOrderStatus,
+        restaurant_status: "placed",
+        delivery_status: "not_assigned",
         payment_status: dbPaymentStatus,
         payment_method: dbPaymentMethod,
         total_items: totalItemCount,
@@ -174,6 +338,12 @@ export async function createBackendOrder(
         service_type: service,
         customer_note: paymentMethod === "cod" ? "Cash on Delivery Order" : null,
         placed_at: new Date().toISOString(),
+        pickup_address: params.pickupAddress || null,
+        pickup_latitude: typeof params.pickupLatitude === "number" ? params.pickupLatitude : null,
+        pickup_longitude: typeof params.pickupLongitude === "number" ? params.pickupLongitude : null,
+        route_polyline: params.routePolyline || null,
+        road_distance_km: typeof params.roadDistanceKm === "number" ? params.roadDistanceKm : null,
+        estimated_duration_mins: typeof params.estimatedDurationMins === "number" ? params.estimatedDurationMins : null,
       };
 
       const { data: insertedOrder, error: orderErr } = await supabase
@@ -191,6 +361,25 @@ export async function createBackendOrder(
       }
 
       createdDbOrderId = insertedOrder.id;
+
+      // For rides service, also synchronize to `rides` table with identical ID
+      if (service === "rides") {
+        try {
+          await supabase.from("rides").insert({
+            id: createdDbOrderId,
+            customer_id: resolvedCustomerId,
+            pickup_address: destination.split("→")[0]?.trim() || "Pickup Location",
+            drop_address: destination.split("→")[1]?.trim() || destination,
+            status: "searching",
+            total_fare: bill.toPay,
+            payment_method: dbPaymentMethod,
+            payment_status: dbPaymentStatus,
+            created_at: new Date().toISOString(),
+          });
+        } catch (rErr) {
+          console.warn("[orderService] Notice inserting into rides table:", rErr);
+        }
+      }
 
       // Insert line items into `order_items`
       if (lines.length > 0 && createdDbOrderId) {
@@ -228,7 +417,7 @@ export async function createBackendOrder(
   let title = "Order";
   let subtitle = `${lines.length} items`;
   if (service === "food") {
-    title = "Royal Biryani House";
+    title = resolvedStoreName || "Restaurant order";
     subtitle = `${lines.reduce((n, l) => n + l.qty, 0)} items · ${lines.map((l) => l.name).join(", ")}`;
   } else if (service === "grocery") {
     title = "Fresh grocery basket";
@@ -269,20 +458,74 @@ export async function createBackendOrder(
   };
 }
 
+export const TERMINAL_ORDER_STATUSES = new Set([
+  "cancelled",
+  "rejected",
+  "completed",
+  "delivered",
+  "expired",
+  "failed",
+]);
+
+/**
+ * Validates whether an order is genuinely active.
+ * Terminal states (cancelled, completed, delivered, rejected, expired) return false.
+ */
+export function isOrderActive(order: Order | null | undefined): boolean {
+  if (!order) return false;
+  // 1. Numeric status check: -1 = Cancelled/Rejected, >= 4 = Completed/Delivered
+  if (order.status === -1 || order.status >= 4) return false;
+
+  // 2. String status check from Supabase backend
+  if (order.orderStatus) {
+    const s = order.orderStatus.toLowerCase().trim();
+    if (TERMINAL_ORDER_STATUSES.has(s)) return false;
+  }
+
+  // 3. Delivery status check from Supabase backend
+  if (order.deliveryStatus) {
+    const ds = order.deliveryStatus.toLowerCase().trim();
+    if (TERMINAL_ORDER_STATUSES.has(ds)) return false;
+  }
+
+  // 4. Restaurant status check
+  if (order.restaurantStatus) {
+    const rs = order.restaurantStatus.toLowerCase().trim();
+    if (TERMINAL_ORDER_STATUSES.has(rs)) return false;
+  }
+
+  // 5. Expiration safeguard: orders created > 18 hours ago without active partner are expired
+  if (order.createdAt && Date.now() - order.createdAt > 18 * 3600 * 1000) {
+    return false;
+  }
+
+  return true;
+}
+
 export function parseBackendStatus(orderStatus: string): number {
-  if (orderStatus === "cancelled") {
-    return -1; // -1 = Cancelled
+  const s = (orderStatus || "").toLowerCase().trim();
+  if (s === "cancelled" || s === "rejected" || s === "failed" || s === "expired") {
+    return -1; // -1 = Cancelled / Rejected
   }
-  if (orderStatus === "delivered" || orderStatus === "completed") {
-    return 3;
+  if (s === "delivered" || s === "completed") {
+    return 4; // 4 = Delivered
   }
-  if (orderStatus === "in_transit" || orderStatus === "on_the_way") {
-    return 2;
+  if (
+    s === "in_transit" ||
+    s === "on_the_way" ||
+    s === "handed_over" ||
+    s === "out_for_delivery" ||
+    s === "picked_up"
+  ) {
+    return 3; // 3 = Handed over / Out for delivery / In transit
   }
-  if (orderStatus === "preparing" || orderStatus === "ready" || orderStatus === "picked_up") {
-    return 1;
+  if (s === "ready" || s === "packed_ready") {
+    return 2; // 2 = Packed & Ready for pickup
   }
-  return 0; // "placed", "accepted", "confirmed"
+  if (s === "preparing" || s === "arrived") {
+    return 1; // 1 = Kitchen Preparing / Captain arrived
+  }
+  return 0; // 0 = Placed / Confirmed / New / Accepted / Searching
 }
 
 export type BackendOrderUpdate = {
@@ -322,13 +565,14 @@ export function subscribeToBackendOrders(
           const raw = payload.new as any;
           if (!raw || !raw.id) return;
 
-          const status = parseBackendStatus(raw.order_status || "");
+          const rawStatus = raw.status || raw.order_status || "";
+          const status = parseBackendStatus(rawStatus);
           const displayId = `RR-${raw.id.slice(0, 8).toUpperCase()}`;
 
           const updatePayload: BackendOrderUpdate = {
             dbId: raw.id,
             displayId,
-            orderStatus: raw.order_status,
+            orderStatus: raw.status || raw.order_status,
             status,
             paymentStatus: raw.payment_status,
             completedAt: raw.completed_at
@@ -420,20 +664,29 @@ export async function fetchOrdersFromBackend(
     }
 
     return data.map((d: any) => {
-      const orderLines: OrderLine[] = (d.order_items || []).map((it: any) => ({
-        name: it.product_name || "Item",
-        qty: Number(it.quantity) || 1,
-        price: Number(it.unit_price) || 0,
-      }));
-
-      // Calculate status number matching frontend lifecycle:
-      // 0 Confirmed · 1 Picked up / Preparing · 2 On the way · 3 Delivered
-      const statusNum = parseBackendStatus(d.order_status || "");
-
       const totalAmt = Number(d.total_amount) || 0;
       const sub = Number(d.subtotal) || totalAmt;
       const delivery = Number(d.delivery_fee) || 0;
       const discount = Number(d.discount_amount) || 0;
+
+      const orderLines: OrderLine[] = (d.order_items || []).map((it: any) => {
+        const qty = Math.max(1, Number(it.quantity) || 1);
+        const unitPrice =
+          Number(it.unit_price) ||
+          (it.total_price ? Math.round(Number(it.total_price) / qty) : 0);
+        return {
+          name: it.product_name || "Item",
+          qty,
+          price: unitPrice,
+        };
+      });
+
+      const fallbackQty = Math.max(1, Number(d.total_items) || 1);
+      const fallbackUnitPrice = Math.round(sub / fallbackQty);
+
+      // Calculate status number matching frontend lifecycle:
+      // -1 Cancelled · 0 Confirmed · 1 Preparing · 2 Ready · 3 Handed over / On the way · 4 Delivered
+      const statusNum = parseBackendStatus(d.order_status || "");
 
       const bill: Bill = {
         itemTotal: sub,
@@ -452,11 +705,24 @@ export async function fetchOrdersFromBackend(
         service: (d.service_type as Service) || "food",
         title: d.service_type === "food" ? "Food order" : d.service_type === "grocery" ? "Grocery order" : "Delivery",
         subtitle: `${d.payment_method || "COD"} · ${d.payment_status || "pending"}`,
-        lines: orderLines.length > 0 ? orderLines : [{ name: "Order items", qty: Number(d.total_items) || 1, price: sub }],
+        lines:
+          orderLines.length > 0
+            ? orderLines
+            : [{ name: "Order items", qty: fallbackQty, price: fallbackUnitPrice }],
         bill,
         payment: d.payment_method === "COD" ? "Cash on Delivery (COD)" : d.payment_method || "Cash on Delivery",
         destination: d.delivery_address || "Lucknow, Uttar Pradesh",
         status: statusNum,
+        orderStatus: d.order_status,
+        restaurantStatus: d.restaurant_status || d.order_status,
+        deliveryStatus: d.delivery_status || "not_assigned",
+        partnerId: d.partner_id || undefined,
+        prepMinutes: d.prep_minutes,
+        prepDeadline: d.prep_deadline || d.promised_by,
+        promisedBy: d.promised_by,
+        acceptedAt: d.accepted_at,
+        readyAt: d.ready_at,
+        handedOverAt: d.handed_over_at,
         createdAt: d.placed_at ? new Date(d.placed_at).getTime() : Date.now(),
         completedAt: d.completed_at ? new Date(d.completed_at).getTime() : undefined,
       };

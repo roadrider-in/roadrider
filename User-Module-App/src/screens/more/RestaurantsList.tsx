@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -7,13 +7,17 @@ import {
   Image,
   TouchableOpacity,
   StatusBar,
+  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import FlowHeader from "../../components/FlowHeader";
 import SearchBar from "../../components/SearchBar";
 import Icon from "../../components/Icon";
-import { RESTAURANTS, FOOD_CATEGORIES } from "../../data/demo";
-import { fetchCuisines } from "../../lib/supabaseData";
+import PremiumRestaurantCard from "../../components/PremiumRestaurantCard";
+import { FoodCardSkeleton } from "../../components/animations/ModuleSkeletons";
+import FadeInView from "../../components/animations/FadeInView";
+import { FOOD_CATEGORIES, type Restaurant } from "../../data/demo";
+import { fetchCuisines, fetchApprovedRestaurants } from "../../lib/supabaseData";
 import { useNav } from "../../navigation/Navigation";
 import { useApp } from "../../state/AppState";
 import { colors, radii } from "../../theme/tokens";
@@ -24,9 +28,32 @@ interface RestaurantsListProps {
 
 export default function RestaurantsList({ cuisine }: RestaurantsListProps) {
   const { back, push } = useNav();
-  const { state, toggleFavorite, setPendingAction, showToast } = useApp();
+  const { state, toggleFavorite, setPendingAction, showToast, placeById } = useApp();
 
-  const handleToggleFav = (r: (typeof RESTAURANTS)[0]) => {
+  const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const currentPlace = placeById(state.defaultPlaceId) ?? state.places[0];
+
+  const loadRestaurants = useCallback(async () => {
+    setIsLoading(true);
+    setLoadError(null);
+    const res = await fetchApprovedRestaurants(currentPlace?.coords ?? null);
+    if (res.error) {
+      setLoadError(res.error);
+      setRestaurants([]);
+    } else {
+      setRestaurants(res.data);
+    }
+    setIsLoading(false);
+  }, [currentPlace?.coords?.lat, currentPlace?.coords?.lng]);
+
+  useEffect(() => {
+    loadRestaurants();
+  }, [loadRestaurants]);
+
+  const handleToggleFav = (r: Restaurant) => {
     if (!state.authenticated) {
       setPendingAction({
         type: "wishlist",
@@ -63,7 +90,7 @@ export default function RestaurantsList({ cuisine }: RestaurantsListProps) {
     };
   }, []);
 
-  const filtered = RESTAURANTS.filter((r) => {
+  const filtered = restaurants.filter((r) => {
     const matchesSearch =
       !search.trim() ||
       r.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -144,77 +171,65 @@ export default function RestaurantsList({ cuisine }: RestaurantsListProps) {
 
         {/* Restaurants List */}
         <View style={styles.restaurantsList}>
-          {filtered.map((restaurant) => {
-            const isFav = state.favorites.includes(restaurant.id);
-            return (
-              <TouchableOpacity
-                key={restaurant.id}
-                activeOpacity={0.85}
-                onPress={() =>
-                  push({
-                    name: "detail",
-                    service: "food",
-                    storeId: restaurant.id,
-                  })
-                }
-                style={styles.restaurantCard}
-              >
-                {/* Photo & Badges */}
-                <View style={styles.cardCoverWrapper}>
-                  <Image
-                    source={{ uri: restaurant.photo }}
-                    style={styles.cardPhoto}
-                    resizeMode="cover"
-                  />
-                  <View style={styles.discountBadge}>
-                    <Text style={styles.discountText}>
-                      {restaurant.discount}
-                    </Text>
-                  </View>
-
-                  <TouchableOpacity
-                    onPress={() => handleToggleFav(restaurant)}
-                    style={styles.favBtn}
-                  >
-                    <Icon
-                      name="heart"
-                      size={16}
-                      filled={isFav}
-                      color={isFav ? "#ff4d2e" : "#777777"}
-                    />
-                  </TouchableOpacity>
-                </View>
-
-                {/* Info Content */}
-                <View style={styles.cardContent}>
-                  <View style={styles.cardTitleRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.restaurantName}>
-                        {restaurant.name}
-                      </Text>
-                      <Text style={styles.cuisinesText}>
-                        {restaurant.cuisines.join(" · ")}
-                      </Text>
-                    </View>
-                    <View style={styles.ratingBadge}>
-                      <Icon name="star" size={10} filled color="#ffffff" />
-                      <Text style={styles.ratingText}>
-                        {" "}
-                        {restaurant.rating}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.cardFooter}>
-                    <Text style={styles.etaText}>
-                      🕒 {restaurant.eta} delivery
-                    </Text>
-                    <Text style={styles.menuLinkText}>View Menu →</Text>
-                  </View>
-                </View>
+          {isLoading ? (
+            <View style={{ paddingTop: 8 }}>
+              <FoodCardSkeleton />
+              <FoodCardSkeleton />
+              <FoodCardSkeleton />
+            </View>
+          ) : loadError ? (
+            <View style={{ padding: 24, margin: 16, backgroundColor: "#fff5f5", borderRadius: radii.md, alignItems: "center", borderWidth: 1, borderColor: "#fed7d7" }}>
+              <Text style={{ fontSize: 14, fontWeight: "700", color: "#c53030", marginBottom: 4 }}>
+                Failed to load restaurants
+              </Text>
+              <Text style={{ fontSize: 12, color: "#742a2a", textAlign: "center", marginBottom: 12 }}>
+                {loadError}
+              </Text>
+              <TouchableOpacity onPress={loadRestaurants} style={{ backgroundColor: colors.accent, paddingHorizontal: 16, paddingVertical: 8, borderRadius: radii.sm }}>
+                <Text style={{ color: "#ffffff", fontSize: 12, fontWeight: "700" }}>Retry</Text>
               </TouchableOpacity>
-            );
-          })}
+            </View>
+          ) : filtered.length === 0 ? (
+            <View style={{ padding: 36, alignItems: "center", backgroundColor: "rgba(0,0,0,0.02)", borderRadius: radii.md, margin: 16 }}>
+              <Text style={{ fontSize: 14, fontWeight: "700", color: colors.ink, marginBottom: 4 }}>
+                {restaurants.length === 0 ? "No approved restaurants available yet." : "No restaurants match your search."}
+              </Text>
+              <Text style={{ fontSize: 12, color: colors.muted, textAlign: "center", lineHeight: 18 }}>
+                {restaurants.length === 0
+                  ? "All restaurant partners undergo strict verification and admin review. Check back soon!"
+                  : "Try clearing search filters or selecting another cuisine."}
+              </Text>
+            </View>
+          ) : (
+            <FadeInView triggerKey={filtered.length}>
+              {filtered.map((restaurant) => {
+                const isFav = state.favorites.includes(restaurant.id);
+                return (
+                  <PremiumRestaurantCard
+                    key={restaurant.id}
+                    restaurant={restaurant}
+                    isFavorite={isFav}
+                    onSelect={(r) =>
+                      push({
+                        name: "detail",
+                        service: "food",
+                        storeId: r.id,
+                      })
+                    }
+                    onSelectFeaturedDish={(r, dish) =>
+                      push({
+                        name: "detail",
+                        service: "food",
+                        storeId: r.id,
+                        highlightItemId: dish.id,
+                      })
+                    }
+                    onToggleFavorite={(r) => handleToggleFav(r)}
+                  />
+                );
+              })}
+            </FadeInView>
+          )}
         </View>
       </ScrollView>
     </SafeAreaView>

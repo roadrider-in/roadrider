@@ -19,6 +19,28 @@ export const colors = {
   darkSurface: "#161c24",
   darkSurface2: "#1f2733",
 
+  // Brand identity design tokens (extracted from login screen reference)
+  brand: {
+    terracotta: "#c84b31",        // Primary button and brand accent
+    terracottaRider: "#d45b37",   // Secondary terracotta for illustration elements
+    creamBg: "#fffdfa",           // Main warm off-white/cream background
+    peachBg: "#faeadd",           // Soft peach for illustration container
+    sageGreen: "#dce7d5",         // Muted sage green hill decoration
+    beigeMuted: "#efd7c3",        // Muted beige hill decoration
+    roadGrey: "#c7bcb3",          // Road divider element
+    charcoal: "#171514",          // Primary heading and dark text
+    charcoalBorder: "#25201d",    // Illustration phone frame
+    lightGreyText: "#77716e",     // Supporting subtitle text
+    captionGrey: "#9a928c",       // Input labels and taglines
+    legalGrey: "#9a938e",         // Legal disclaimer text
+    legalBold: "#5d5651",         // Legal strong text
+    inputBorder: "#ddd6d0",       // Form input borders
+    inputBorderActive: "#c84b31", // Form input focused border
+    inputBg: "#ffffff",           // Input background
+    backBtnBg: "#f4efeb",         // Rounded back navigation button background
+    settingsBlue: "#3983f7",      // Blue accent for settings/auxiliary actions
+  },
+
   // Vertical-specific theme palettes
   services: {
     food: {

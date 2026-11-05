@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -7,17 +7,21 @@ import {
   Image,
   TouchableOpacity,
   StatusBar,
+  ActivityIndicator,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import FlowHeader from "../../components/FlowHeader";
 import Icon from "../../components/Icon";
 import {
-  PRODUCTS,
-  RESTAURANTS,
   type MenuItem,
   type Restaurant,
+  type Product,
   type Service,
 } from "../../data/demo";
+import {
+  fetchApprovedRestaurants,
+  fetchApprovedGroceryProducts,
+} from "../../lib/supabaseData";
 import { rupees } from "../../lib/pricing";
 import { useNav } from "../../navigation/Navigation";
 import { useApp } from "../../state/AppState";
@@ -46,14 +50,37 @@ export default function Favorites({ service }: FavoritesProps) {
     "all" | "dishes" | "restaurants" | "groceries"
   >(isGroceryContext ? "groceries" : "all");
 
+  const [allRestaurants, setAllRestaurants] = useState<Restaurant[]>([]);
+  const [allGroceries, setAllGroceries] = useState<Product[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadData() {
+      setIsLoading(true);
+      const [restRes, grocRes] = await Promise.all([
+        fetchApprovedRestaurants(),
+        fetchApprovedGroceryProducts(),
+      ]);
+      if (!isMounted) return;
+      setAllRestaurants(restRes.data || []);
+      setAllGroceries(grocRes.data || []);
+      setIsLoading(false);
+    }
+    loadData();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   // Collect favorited restaurants
-  const favoriteRestaurants: Restaurant[] = RESTAURANTS.filter((r) =>
+  const favoriteRestaurants: Restaurant[] = allRestaurants.filter((r) =>
     state.favorites.includes(r.id)
   );
 
   // Collect favorited dishes across all restaurant menus
   const favoriteDishes: { dish: MenuItem; restaurant: Restaurant }[] = [];
-  for (const r of RESTAURANTS) {
+  for (const r of allRestaurants) {
     for (const m of r.menu) {
       if (state.favorites.includes(m.id)) {
         favoriteDishes.push({ dish: m, restaurant: r });
@@ -62,7 +89,7 @@ export default function Favorites({ service }: FavoritesProps) {
   }
 
   // Collect favorited groceries
-  const favoriteGroceries = PRODUCTS.filter((p) =>
+  const favoriteGroceries = allGroceries.filter((p) =>
     state.favorites.includes(p.id)
   );
 
@@ -130,7 +157,7 @@ export default function Favorites({ service }: FavoritesProps) {
     showToast(`Added ${dish.name} to cart`);
   };
 
-  const handleAddGrocery = (product: (typeof PRODUCTS)[0]) => {
+  const handleAddGrocery = (product: Product) => {
     if (!state.authenticated) {
       setPendingAction({
         type: "cart",
@@ -283,7 +310,14 @@ export default function Favorites({ service }: FavoritesProps) {
           </ScrollView>
         )}
 
-        {totalCount === 0 ? (
+        {isLoading ? (
+          <View style={{ paddingVertical: 48, alignItems: "center" }}>
+            <ActivityIndicator size="small" color={colors.accent} />
+            <Text style={{ marginTop: 12, color: colors.muted, fontSize: 13 }}>
+              Loading saved favorites...
+            </Text>
+          </View>
+        ) : totalCount === 0 ? (
           <View style={styles.emptyCard}>
             <View style={styles.emptyHeartBox}>
               <Icon name="heart" size={32} color={colors.accent} />

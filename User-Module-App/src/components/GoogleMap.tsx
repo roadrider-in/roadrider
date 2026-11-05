@@ -1,7 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Platform,
   StyleSheet,
   Text,
@@ -11,7 +10,6 @@ import {
   type ViewStyle,
 } from "react-native";
 import MapView, { Marker, Polyline, PROVIDER_DEFAULT, PROVIDER_GOOGLE } from "react-native-maps";
-import Svg, { Circle, Defs, G, Line, LinearGradient, Path, Rect, Stop } from "react-native-svg";
 import {
   DARK_MAP_STYLE,
   DEFAULT_CENTER,
@@ -28,10 +26,27 @@ export interface EtaResult {
   durationSeconds: number;
 }
 
+export interface PickupPointMarker {
+  id: string;
+  name: string;
+  address?: string;
+  lat: number;
+  lng: number;
+}
+
 export interface GoogleMapProps {
   origin?: LatLng;
   destination?: LatLng;
   driver?: LatLng;
+  captainLocation?: LatLng & { heading?: number };
+  pickupPoints?: PickupPointMarker[];
+  selectedPickupPointId?: string;
+  onSelectPickupPoint?: (point: PickupPointMarker) => void;
+  routeCoordinates?: Array<{ latitude: number; longitude: number }>;
+  draggableMarker?: LatLng;
+  onDragEnd?: (coords: LatLng) => void;
+  showRecenterBtn?: boolean;
+  onRecenter?: () => void;
   etaText?: string;
   etaUnit?: string;
   interactive?: boolean;
@@ -39,12 +54,23 @@ export interface GoogleMapProps {
   showRoute?: boolean;
   onEtaCalculated?: (eta: EtaResult) => void;
   showCoordsChip?: boolean;
+  theme?: "dark" | "blue" | "default";
+  showsUserLocation?: boolean;
 }
 
 export default function GoogleMap({
   origin,
   destination,
   driver,
+  captainLocation,
+  pickupPoints,
+  selectedPickupPointId,
+  onSelectPickupPoint,
+  routeCoordinates,
+  draggableMarker,
+  onDragEnd,
+  showRecenterBtn = false,
+  onRecenter,
   etaText = "15 min",
   etaUnit = "away",
   interactive = true,
@@ -52,51 +78,83 @@ export default function GoogleMap({
   showRoute = true,
   onEtaCalculated,
   showCoordsChip = false,
+  theme = "default",
+  showsUserLocation = false,
 }: GoogleMapProps) {
   const mapRef = useRef<MapView>(null);
   const [liveEta, setLiveEta] = useState<EtaResult | null>(null);
-  const [isMapLoaded, setIsMapLoaded] = useState(false);
   const [isMapReady, setIsMapReady] = useState(false);
-  const [hasTimedOut, setHasTimedOut] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
 
-  // Compute distance and ETA only when both origin and destination exist
+  // Stable ref for parent callback to break render loops
+  const onEtaCalculatedRef = useRef(onEtaCalculated);
   useEffect(() => {
-    if (origin && destination) {
-      const km = computeDistanceKm(origin, destination);
-      const eta = computeEstimatedEta(km);
-      setLiveEta(eta);
-      onEtaCalculated?.(eta);
-    } else {
-      setLiveEta(null);
-    }
-  }, [origin, destination, onEtaCalculated]);
+    onEtaCalculatedRef.current = onEtaCalculated;
+  });
 
-  // Monitor tile loading timeout (4.5s)
+  // Track previous calculated ETA to avoid duplicate state sets
+  const prevEtaRef = useRef<EtaResult | null>(null);
+
+  // Compute distance and ETA strictly based on primitive coordinates
+  const originLat = origin?.lat;
+  const originLng = origin?.lng;
+  const destLat = destination?.lat;
+  const destLng = destination?.lng;
+  const driverLat = driver?.lat;
+  const driverLng = driver?.lng;
+
   useEffect(() => {
-    setIsMapLoaded(false);
-    setHasTimedOut(false);
-    const timer = setTimeout(() => {
-      setHasTimedOut(true);
-    }, 4500);
-    return () => clearTimeout(timer);
-  }, [retryKey, origin?.lat, origin?.lng, destination?.lat, destination?.lng]);
+    if (
+      typeof originLat === "number" &&
+      typeof originLng === "number" &&
+      typeof destLat === "number" &&
+      typeof destLng === "number"
+    ) {
+      const orig: LatLng = { lat: originLat, lng: originLng };
+      const dest: LatLng = { lat: destLat, lng: destLng };
+      const km = computeDistanceKm(orig, dest);
+      const eta = computeEstimatedEta(km);
+
+      const prev = prevEtaRef.current;
+      if (
+        !prev ||
+        prev.durationSeconds !== eta.durationSeconds ||
+        prev.distanceText !== eta.distanceText ||
+        prev.durationText !== eta.durationText
+      ) {
+        prevEtaRef.current = eta;
+        setLiveEta(eta);
+        onEtaCalculatedRef.current?.(eta);
+      }
+    } else {
+      if (prevEtaRef.current !== null) {
+        prevEtaRef.current = null;
+        setLiveEta(null);
+      }
+    }
+  }, [originLat, originLng, destLat, destLng]);
 
   // Calculate center and span region based on actual points
   const region = useMemo(() => {
     const lats: number[] = [];
     const lngs: number[] = [];
-    if (origin) {
-      lats.push(origin.lat);
-      lngs.push(origin.lng);
+    if (typeof originLat === "number" && typeof originLng === "number") {
+      lats.push(originLat);
+      lngs.push(originLng);
     }
-    if (destination) {
-      lats.push(destination.lat);
-      lngs.push(destination.lng);
+    if (typeof destLat === "number" && typeof destLng === "number") {
+      lats.push(destLat);
+      lngs.push(destLng);
     }
-    if (driver) {
-      lats.push(driver.lat);
-      lngs.push(driver.lng);
+    if (typeof driverLat === "number" && typeof driverLng === "number") {
+      lats.push(driverLat);
+      lngs.push(driverLng);
+    }
+    if (pickupPoints && pickupPoints.length > 0) {
+      pickupPoints.forEach((p) => {
+        lats.push(p.lat);
+        lngs.push(p.lng);
+      });
     }
 
     if (lats.length === 0) {
@@ -115,8 +173,8 @@ export default function GoogleMap({
 
     const midLat = (minLat + maxLat) / 2;
     const midLng = (minLng + maxLng) / 2;
-    const latDelta = Math.max(0.02, (maxLat - minLat) * 1.5 || 0.03);
-    const lngDelta = Math.max(0.02, (maxLng - minLng) * 1.5 || 0.03);
+    const latDelta = Math.max(0.015, (maxLat - minLat) * 1.5 || 0.02);
+    const lngDelta = Math.max(0.015, (maxLng - minLng) * 1.5 || 0.02);
 
     return {
       latitude: midLat,
@@ -124,7 +182,7 @@ export default function GoogleMap({
       latitudeDelta: latDelta,
       longitudeDelta: lngDelta,
     };
-  }, [origin, destination, driver]);
+  }, [originLat, originLng, destLat, destLng, driverLat, driverLng, pickupPoints]);
 
   const displayEta = liveEta ? liveEta.durationText : etaText;
   const displaySub = liveEta?.distanceText
@@ -132,106 +190,66 @@ export default function GoogleMap({
     : etaUnit;
 
   const polylineCoords = useMemo(() => {
-    if (!origin || !destination) return [];
-    const coords = [
-      { latitude: origin.lat, longitude: origin.lng },
-    ];
-    if (driver) {
-      coords.push({ latitude: driver.lat, longitude: driver.lng });
+    if (routeCoordinates && routeCoordinates.length > 0) {
+      return routeCoordinates;
     }
-    coords.push({ latitude: destination.lat, longitude: destination.lng });
+    if (typeof originLat !== "number" || typeof destLat !== "number") return [];
+    const coords = [{ latitude: originLat, longitude: originLng! }];
+    if (typeof driverLat === "number" && typeof driverLng === "number") {
+      coords.push({ latitude: driverLat, longitude: driverLng });
+    }
+    coords.push({ latitude: destLat, longitude: destLng! });
     return coords;
-  }, [origin, destination, driver]);
+  }, [routeCoordinates, originLat, originLng, destLat, destLng, driverLat, driverLng]);
 
   const mapProvider =
     Platform.OS === "android" ? PROVIDER_GOOGLE : PROVIDER_DEFAULT;
 
-  const fitMapToPoints = (animated = true) => {
-    const coordsToFit: { latitude: number; longitude: number }[] = [];
-    if (origin) coordsToFit.push({ latitude: origin.lat, longitude: origin.lng });
-    if (destination)
-      coordsToFit.push({ latitude: destination.lat, longitude: destination.lng });
-    if (driver) coordsToFit.push({ latitude: driver.lat, longitude: driver.lng });
+  const fitMapToPoints = useCallback(
+    (animated = true) => {
+      const coordsToFit: { latitude: number; longitude: number }[] = [];
+      if (typeof originLat === "number" && typeof originLng === "number") {
+        coordsToFit.push({ latitude: originLat, longitude: originLng });
+      }
+      if (typeof destLat === "number" && typeof destLng === "number") {
+        coordsToFit.push({ latitude: destLat, longitude: destLng });
+      }
+      if (typeof driverLat === "number" && typeof driverLng === "number") {
+        coordsToFit.push({ latitude: driverLat, longitude: driverLng });
+      }
+      if (captainLocation && typeof captainLocation.lat === "number") {
+        coordsToFit.push({ latitude: captainLocation.lat, longitude: captainLocation.lng });
+      }
+      if (routeCoordinates && routeCoordinates.length > 0) {
+        const len = routeCoordinates.length;
+        coordsToFit.push(routeCoordinates[0]);
+        if (len > 2) coordsToFit.push(routeCoordinates[Math.floor(len / 2)]);
+        coordsToFit.push(routeCoordinates[len - 1]);
+      }
 
-    if (coordsToFit.length >= 2) {
-      mapRef.current?.fitToCoordinates(coordsToFit, {
-        edgePadding: { top: 60, right: 60, bottom: 60, left: 60 },
-        animated,
-      });
-    } else if (coordsToFit.length === 1) {
-      mapRef.current?.animateToRegion(
-        {
-          latitude: coordsToFit[0].latitude,
-          longitude: coordsToFit[0].longitude,
-          latitudeDelta: 0.02,
-          longitudeDelta: 0.02,
-        },
-        animated ? 500 : 0
-      );
-    }
-  };
+      if (coordsToFit.length >= 2) {
+        mapRef.current?.fitToCoordinates(coordsToFit, {
+          edgePadding: { top: 70, right: 60, bottom: 90, left: 60 },
+          animated,
+        });
+      } else if (coordsToFit.length === 1) {
+        mapRef.current?.animateToRegion(
+          {
+            latitude: coordsToFit[0].latitude,
+            longitude: coordsToFit[0].longitude,
+            latitudeDelta: 0.015,
+            longitudeDelta: 0.015,
+          },
+          animated ? 500 : 0
+        );
+      }
+    },
+    [originLat, originLng, destLat, destLng, driverLat, driverLng, captainLocation, routeCoordinates]
+  );
 
   useEffect(() => {
     fitMapToPoints(true);
-  }, [
-    origin?.lat,
-    origin?.lng,
-    destination?.lat,
-    destination?.lng,
-    driver?.lat,
-    driver?.lng,
-  ]);
-
-  // Normalized fallback coordinates for SVG rendering
-  const fallbackPoints = useMemo(() => {
-    if (!origin && !destination) return null;
-    const lats = [origin?.lat ?? 26.8467, destination?.lat ?? 26.852];
-    const lngs = [origin?.lng ?? 80.9462, destination?.lng ?? 80.949];
-    if (driver) {
-      lats.push(driver.lat);
-      lngs.push(driver.lng);
-    }
-    const minLat = Math.min(...lats);
-    const maxLat = Math.max(...lats);
-    const minLng = Math.min(...lngs);
-    const maxLng = Math.max(...lngs);
-
-    const padX = 60;
-    const padY = 50;
-    const w = 360 - padX * 2;
-    const h = 200 - padY * 2;
-    const latSpan = maxLat - minLat || 0.005;
-    const lngSpan = maxLng - minLng || 0.005;
-
-    const toSvg = (pt?: LatLng) => {
-      if (!pt) return { x: 180, y: 100 };
-      const normX = (pt.lng - minLng) / lngSpan;
-      const normY = (pt.lat - minLat) / latSpan;
-      return {
-        x: Math.round(padX + normX * w),
-        y: Math.round(padY + (1 - normY) * h),
-      };
-    };
-
-    return {
-      originSvg: toSvg(origin),
-      destSvg: toSvg(destination),
-      driverSvg: driver ? toSvg(driver) : null,
-    };
-  }, [origin, destination, driver]);
-
-  const handleInfoPress = () => {
-    Alert.alert(
-      "Google Maps Tiles Status",
-      "Native Google Maps tiles are currently unavailable in this environment.\n\n" +
-        "Root cause: Google Cloud Billing must be enabled, and the 'Maps SDK for Android' must be active without conflicting package restrictions in Expo Go.\n\n" +
-        "Note: Route calculations, live coordinates, and ETA remain 100% active.",
-      [{ text: "OK" }]
-    );
-  };
-
-  const showFallback = !isMapLoaded && hasTimedOut;
-  const showLoading = !isMapLoaded && !hasTimedOut;
+  }, [fitMapToPoints]);
 
   return (
     <View style={[styles.container, style]}>
@@ -246,7 +264,9 @@ export default function GoogleMap({
         zoomEnabled={interactive}
         pitchEnabled={interactive}
         rotateEnabled={false}
-        customMapStyle={DARK_MAP_STYLE}
+        showsUserLocation={showsUserLocation}
+        showsMyLocationButton={false}
+        customMapStyle={theme === "dark" ? DARK_MAP_STYLE : undefined}
         onMapReady={() => {
           setIsMapReady(true);
           if (__DEV__) {
@@ -256,12 +276,6 @@ export default function GoogleMap({
           }
           fitMapToPoints(false);
         }}
-        onMapLoaded={() => {
-          setIsMapLoaded(true);
-          if (__DEV__) {
-            console.log("[RoadRider:GoogleMap] MapView tiles loaded successfully");
-          }
-        }}
       >
         {/* Origin / Store Marker */}
         {origin && (
@@ -270,11 +284,42 @@ export default function GoogleMap({
             title={origin.label || "Pickup"}
             tracksViewChanges={false}
           >
-            <View style={styles.originMarker}>
-              <View style={styles.originDot} />
+            <View style={[styles.originMarker, theme === "blue" && styles.originMarkerBlue]}>
+              <View style={[styles.originDot, theme === "blue" && styles.originDotBlue]} />
             </View>
           </Marker>
         )}
+
+        {/* Nearby Pickup Points (Screen 2: Reference Image 5) */}
+        {pickupPoints &&
+          pickupPoints.map((point) => {
+            const isSelected = selectedPickupPointId === point.id;
+            return (
+              <Marker
+                key={point.id}
+                coordinate={{ latitude: point.lat, longitude: point.lng }}
+                title={point.name}
+                tracksViewChanges={false}
+                onPress={() => onSelectPickupPoint?.(point)}
+              >
+                {isSelected ? (
+                  <View style={styles.selectedPickupMarkerContainer}>
+                    <View style={styles.selectedPickupPill}>
+                      <Text style={styles.selectedPickupPillText}>Pickup Point</Text>
+                    </View>
+                    <View style={styles.selectedPickupPointer} />
+                    <View style={styles.pickupPointRingOuter}>
+                      <View style={styles.pickupPointRingInner} />
+                    </View>
+                  </View>
+                ) : (
+                  <View style={styles.pickupPointRingOuter}>
+                    <View style={styles.pickupPointRingInner} />
+                  </View>
+                )}
+              </Marker>
+            );
+          })}
 
         {/* Destination Marker */}
         {destination && (
@@ -293,11 +338,45 @@ export default function GoogleMap({
         {driver && (
           <Marker
             coordinate={{ latitude: driver.lat, longitude: driver.lng }}
-            title={driver.label || "RoadRider Driver"}
+            title={driver.label || "RoadRider Captain"}
             tracksViewChanges={false}
           >
-            <View style={styles.driverMarker}>
+            <View style={[styles.driverMarker, theme === "blue" && styles.driverMarkerBlue]}>
               <Text style={styles.driverEmoji}>🚗</Text>
+            </View>
+          </Marker>
+        )}
+
+        {/* Real-time Captain Marker with Dynamic Heading Rotation */}
+        {captainLocation && (
+          <Marker
+            coordinate={{ latitude: captainLocation.lat, longitude: captainLocation.lng }}
+            title={captainLocation.label || "RoadRider Captain"}
+            rotation={captainLocation.heading || 0}
+            anchor={{ x: 0.5, y: 0.5 }}
+            flat={true}
+            tracksViewChanges={false}
+          >
+            <View style={[styles.captainMarker, theme === "blue" && styles.captainMarkerBlue]}>
+              <Text style={styles.captainEmoji}>🛵</Text>
+            </View>
+          </Marker>
+        )}
+
+        {/* Draggable Marker for precise pin drop */}
+        {draggableMarker && (
+          <Marker
+            coordinate={{ latitude: draggableMarker.lat, longitude: draggableMarker.lng }}
+            draggable
+            onDragEnd={(e) => {
+              const { latitude, longitude } = e.nativeEvent.coordinate;
+              onDragEnd?.({ lat: latitude, lng: longitude });
+            }}
+            title="Drag to adjust location"
+          >
+            <View style={styles.draggableMarkerPin}>
+              <View style={styles.draggableMarkerHead} />
+              <View style={styles.draggableMarkerStem} />
             </View>
           </Marker>
         )}
@@ -306,168 +385,17 @@ export default function GoogleMap({
         {showRoute && origin && destination && (
           <Polyline
             coordinates={polylineCoords}
-            strokeColor="#e05a0f"
+            strokeColor={theme === "blue" ? "#1769E8" : "#e05a0f"}
             strokeWidth={4}
           />
         )}
       </MapView>
 
-      {/* 2. Loading State (0 - 4.5s while tiles are authenticating) */}
-      {showLoading && (
-        <View style={styles.loadingOverlay} pointerEvents="none">
-          <ActivityIndicator size="small" color="#e05a0f" />
-          <Text style={styles.loadingText}>Loading Google Map...</Text>
-        </View>
-      )}
-
-      {/* 3. Fallback Route Canvas (Rendered if native tiles fail to load) */}
-      {showFallback && (
-        <View style={styles.fallbackCanvas}>
-          {/* Subtle Vector Background Grid & Route */}
-          <Svg style={StyleSheet.absoluteFill} viewBox="0 0 360 200">
-            <Defs>
-              <LinearGradient id="routeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                <Stop offset="0%" stopColor="#22c55e" stopOpacity="0.8" />
-                <Stop offset="100%" stopColor="#e05a0f" stopOpacity="0.9" />
-              </LinearGradient>
-            </Defs>
-
-            {/* Subtle Grid lines */}
-            <Line x1="0" y1="50" x2="360" y2="50" stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
-            <Line x1="0" y1="100" x2="360" y2="100" stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
-            <Line x1="0" y1="150" x2="360" y2="150" stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
-            <Line x1="90" y1="0" x2="90" y2="200" stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
-            <Line x1="180" y1="0" x2="180" y2="200" stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
-            <Line x1="270" y1="0" x2="270" y2="200" stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
-
-            {/* Route line */}
-            {fallbackPoints && (
-              <G>
-                {/* Glow underlay */}
-                <Line
-                  x1={fallbackPoints.originSvg.x}
-                  y1={fallbackPoints.originSvg.y}
-                  x2={fallbackPoints.driverSvg ? fallbackPoints.driverSvg.x : fallbackPoints.destSvg.x}
-                  y2={fallbackPoints.driverSvg ? fallbackPoints.driverSvg.y : fallbackPoints.destSvg.y}
-                  stroke="#22c55e"
-                  strokeWidth="6"
-                  strokeOpacity="0.25"
-                  strokeLinecap="round"
-                />
-                <Line
-                  x1={fallbackPoints.originSvg.x}
-                  y1={fallbackPoints.originSvg.y}
-                  x2={fallbackPoints.driverSvg ? fallbackPoints.driverSvg.x : fallbackPoints.destSvg.x}
-                  y2={fallbackPoints.driverSvg ? fallbackPoints.driverSvg.y : fallbackPoints.destSvg.y}
-                  stroke="#22c55e"
-                  strokeWidth="3"
-                  strokeDasharray="6,4"
-                  strokeLinecap="round"
-                />
-
-                {fallbackPoints.driverSvg && (
-                  <>
-                    <Line
-                      x1={fallbackPoints.driverSvg.x}
-                      y1={fallbackPoints.driverSvg.y}
-                      x2={fallbackPoints.destSvg.x}
-                      y2={fallbackPoints.destSvg.y}
-                      stroke="#e05a0f"
-                      strokeWidth="6"
-                      strokeOpacity="0.25"
-                      strokeLinecap="round"
-                    />
-                    <Line
-                      x1={fallbackPoints.driverSvg.x}
-                      y1={fallbackPoints.driverSvg.y}
-                      x2={fallbackPoints.destSvg.x}
-                      y2={fallbackPoints.destSvg.y}
-                      stroke="#e05a0f"
-                      strokeWidth="3"
-                      strokeDasharray="6,4"
-                      strokeLinecap="round"
-                    />
-                  </>
-                )}
-              </G>
-            )}
-          </Svg>
-
-          {/* Fallback Markers */}
-          {fallbackPoints && (
-            <>
-              {/* Origin Marker */}
-              <View
-                style={[
-                  styles.fallbackMarkerWrapper,
-                  {
-                    left: fallbackPoints.originSvg.x - 12,
-                    top: fallbackPoints.originSvg.y - 12,
-                  },
-                ]}
-              >
-                <View style={styles.originMarker}>
-                  <View style={styles.originDot} />
-                </View>
-                <Text style={styles.fallbackMarkerText} numberOfLines={1}>
-                  {origin?.label || "Pickup"}
-                </Text>
-              </View>
-
-              {/* Destination Marker */}
-              <View
-                style={[
-                  styles.fallbackMarkerWrapper,
-                  {
-                    left: fallbackPoints.destSvg.x - 14,
-                    top: fallbackPoints.destSvg.y - 14,
-                  },
-                ]}
-              >
-                <View style={styles.destinationMarker}>
-                  <View style={styles.destinationPin} />
-                </View>
-                <Text style={styles.fallbackMarkerText} numberOfLines={1}>
-                  {destination?.label || "Drop-off"}
-                </Text>
-              </View>
-
-              {/* Driver Marker */}
-              {fallbackPoints.driverSvg && (
-                <View
-                  style={[
-                    styles.fallbackMarkerWrapper,
-                    {
-                      left: fallbackPoints.driverSvg.x - 15,
-                      top: fallbackPoints.driverSvg.y - 15,
-                    },
-                  ]}
-                >
-                  <View style={styles.driverMarker}>
-                    <Text style={styles.driverEmoji}>🚗</Text>
-                  </View>
-                </View>
-              )}
-            </>
-          )}
-
-          {/* Top Status Alert Badge */}
-          <TouchableOpacity
-            activeOpacity={0.85}
-            onPress={handleInfoPress}
-            style={styles.statusBanner}
-          >
-            <View style={styles.statusDotWarning} />
-            <Text style={styles.statusBannerText} numberOfLines={1}>
-              Map Tiles Offline · Live Route Active
-            </Text>
-            <TouchableOpacity
-              onPress={() => setRetryKey((k) => k + 1)}
-              style={styles.retryBtn}
-            >
-              <Text style={styles.retryBtnText}>Retry</Text>
-            </TouchableOpacity>
-          </TouchableOpacity>
+      {/* Non-blocking subtle loading indicator */}
+      {!isMapReady && (
+        <View style={styles.loadingPill} pointerEvents="none">
+          <ActivityIndicator size="small" color={theme === "blue" ? "#1769E8" : "#e05a0f"} />
+          <Text style={styles.loadingPillText}>Loading map...</Text>
         </View>
       )}
 
@@ -479,6 +407,19 @@ export default function GoogleMap({
             {destination.lat.toFixed(4)}° N, {destination.lng.toFixed(4)}° E
           </Text>
         </View>
+      )}
+
+      {/* Floating Recenter Button */}
+      {showRecenterBtn && (
+        <TouchableOpacity
+          style={styles.recenterBtn}
+          onPress={() => (onRecenter ? onRecenter() : fitMapToPoints(true))}
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel="Recenter map"
+        >
+          <Text style={styles.recenterIcon}>🎯</Text>
+        </TouchableOpacity>
       )}
 
       {/* ETA Bubble - Only shown when route/destination exists or custom eta */}
@@ -496,83 +437,31 @@ const styles = StyleSheet.create({
   container: {
     width: "100%",
     height: "100%",
-    backgroundColor: "#161c24",
+    backgroundColor: "#f1f5f9",
     position: "relative",
     overflow: "hidden",
   },
-  loadingOverlay: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: "#111827",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-    zIndex: 10,
-  },
-  loadingText: {
-    color: "#9ca3af",
-    fontSize: 12,
-    fontWeight: "500",
-  },
-  fallbackCanvas: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: "#0d1b2a",
-    overflow: "hidden",
-  },
-  fallbackMarkerWrapper: {
+  loadingPill: {
     position: "absolute",
-    alignItems: "center",
-  },
-  fallbackMarkerText: {
-    color: "#ffffff",
-    fontSize: 10,
-    fontWeight: "600",
-    marginTop: 2,
-    backgroundColor: "rgba(0,0,0,0.75)",
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-    borderRadius: 3,
-    maxWidth: 90,
-  },
-  statusBanner: {
-    position: "absolute",
-    top: 10,
-    left: 10,
-    right: 10,
-    backgroundColor: "rgba(17, 24, 39, 0.92)",
-    borderWidth: 1,
-    borderColor: "rgba(245, 158, 11, 0.4)",
-    borderRadius: 8,
-    paddingHorizontal: 10,
+    top: 12,
+    alignSelf: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.94)",
+    paddingHorizontal: 12,
     paddingVertical: 6,
+    borderRadius: 20,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    zIndex: 20,
+    gap: 6,
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    zIndex: 10,
   },
-  statusDotWarning: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: "#f59e0b",
-    marginRight: 6,
-  },
-  statusBannerText: {
-    color: "#fbbf24",
-    fontSize: 11,
+  loadingPillText: {
+    color: "#475569",
+    fontSize: 12,
     fontWeight: "600",
-    flex: 1,
-  },
-  retryBtn: {
-    backgroundColor: "rgba(245, 158, 11, 0.2)",
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 4,
-    marginLeft: 6,
-  },
-  retryBtnText: {
-    color: "#f59e0b",
-    fontSize: 10,
-    fontWeight: "700",
   },
   originMarker: {
     width: 22,
@@ -589,6 +478,68 @@ const styles = StyleSheet.create({
     backgroundColor: "#22c55e",
     borderWidth: 2,
     borderColor: "#ffffff",
+  },
+  originMarkerBlue: {
+    backgroundColor: "rgba(23, 105, 232, 0.25)",
+  },
+  originDotBlue: {
+    backgroundColor: "#1769E8",
+  },
+  driverMarkerBlue: {
+    backgroundColor: "#1769E8",
+  },
+  selectedPickupMarkerContainer: {
+    alignItems: "center",
+  },
+  selectedPickupPill: {
+    backgroundColor: "#15803d",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    shadowColor: "#000",
+    shadowOpacity: 0.2,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  selectedPickupPillText: {
+    color: "#ffffff",
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.3,
+  },
+  selectedPickupPointer: {
+    width: 0,
+    height: 0,
+    borderLeftWidth: 5,
+    borderRightWidth: 5,
+    borderTopWidth: 5,
+    borderStyle: "solid",
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+    borderTopColor: "#15803d",
+    marginBottom: 2,
+  },
+  pickupPointRingOuter: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "#ffffff",
+    borderWidth: 2.5,
+    borderColor: "#16a34a",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.15,
+    shadowOffset: { width: 0, height: 1 },
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  pickupPointRingInner: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#16a34a",
   },
   destinationMarker: {
     width: 26,
@@ -618,6 +569,71 @@ const styles = StyleSheet.create({
   },
   driverEmoji: {
     fontSize: 13,
+  },
+  captainMarker: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#1769E8",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: "#ffffff",
+    shadowColor: "#000",
+    shadowOpacity: 0.3,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  captainMarkerBlue: {
+    backgroundColor: "#1769E8",
+  },
+  captainEmoji: {
+    fontSize: 16,
+  },
+  draggableMarkerPin: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  draggableMarkerHead: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#ef4444",
+    borderWidth: 3,
+    borderColor: "#ffffff",
+    shadowColor: "#000",
+    shadowOpacity: 0.25,
+    shadowOffset: { width: 0, height: 3 },
+    shadowRadius: 4,
+    elevation: 6,
+  },
+  draggableMarkerStem: {
+    width: 3,
+    height: 10,
+    backgroundColor: "#ef4444",
+  },
+  recenterBtn: {
+    position: "absolute",
+    bottom: 70,
+    right: 14,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#ffffff",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.2,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 5,
+    elevation: 5,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.06)",
+    zIndex: 15,
+  },
+  recenterIcon: {
+    fontSize: 20,
   },
   gpsChip: {
     position: "absolute",

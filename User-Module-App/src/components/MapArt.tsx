@@ -11,6 +11,7 @@ export interface MapArtProps {
   etaUnit?: string;
   style?: StyleProp<ViewStyle>;
   onEtaCalculated?: (eta: EtaResult) => void;
+  theme?: "dark" | "blue" | "default";
 }
 
 export default function MapArt({
@@ -21,6 +22,7 @@ export default function MapArt({
   etaUnit = "away",
   style,
   onEtaCalculated,
+  theme = "default",
 }: MapArtProps) {
   return (
     <GoogleMap
@@ -32,6 +34,7 @@ export default function MapArt({
       style={style}
       showRoute
       onEtaCalculated={onEtaCalculated}
+      theme={theme}
     />
   );
 }

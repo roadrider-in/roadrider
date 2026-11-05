@@ -24,6 +24,7 @@ import {
   getActiveSession,
 } from "../../lib/authService";
 import type { LatLng } from "../../lib/googleMaps";
+import { useI18n, SUPPORTED_LANGUAGES } from "../../lib/i18n";
 
 interface ProfileProps {
   mode?: "completion";
@@ -34,9 +35,9 @@ export default function Profile({ mode }: ProfileProps) {
   const { back, reset } = useNav();
   const { state, updateProfile, addPlace, setDefaultPlace, signOut, showToast } =
     useApp();
+  const { language, setLanguage, t } = useI18n();
 
   const [name, setName] = useState(state.profile.name || "");
-  const [language, setLanguage] = useState("English");
   const [addressLabel, setAddressLabel] = useState<"Home" | "Work" | "Other">("Home");
   const [addressLine, setAddressLine] = useState(state.places[0]?.line || "");
   const [addressArea, setAddressArea] = useState(
@@ -316,18 +317,19 @@ export default function Profile({ mode }: ProfileProps) {
 
           {/* Language Selector */}
           <View style={styles.fieldGroup}>
-            <Text style={styles.fieldLabel}>APP LANGUAGE</Text>
+            <Text style={styles.fieldLabel}>{t("lang_settings", "APP LANGUAGE / भाषा")}</Text>
             <View style={styles.langButtonsRow}>
-              {["English"].map((lang) => {
-                const isSelected = language === lang;
+              {SUPPORTED_LANGUAGES.map((l) => {
+                const isSelected = language === l.name;
                 return (
                   <TouchableOpacity
-                    key={lang}
-                    onPress={() => setLanguage(lang)}
+                    key={l.code}
+                    onPress={() => setLanguage(l.name)}
                     style={[
                       styles.langBtn,
                       isSelected && styles.langBtnSelected,
                     ]}
+                    activeOpacity={0.8}
                   >
                     <Text
                       style={[
@@ -335,7 +337,7 @@ export default function Profile({ mode }: ProfileProps) {
                         isSelected && styles.langBtnTextSelected,
                       ]}
                     >
-                      {lang}
+                      {l.name}
                     </Text>
                   </TouchableOpacity>
                 );

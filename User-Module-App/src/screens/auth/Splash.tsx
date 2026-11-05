@@ -1,10 +1,12 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import {
   StyleSheet,
   Text,
   View,
   ImageBackground,
   StatusBar,
+  Animated,
+  Easing,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Icon from "../../components/Icon";
@@ -13,9 +15,77 @@ import Button from "../../components/Button";
 import { PHOTOS } from "../../data/demo";
 import { useNav } from "../../navigation/Navigation";
 import { colors } from "../../theme/tokens";
+import { useReducedMotion } from "../../hooks/useReducedMotion";
 
 export default function Splash() {
   const { push } = useNav();
+  const isReducedMotion = useReducedMotion();
+
+  // Entrance animations
+  const headerOpacity = useRef(new Animated.Value(isReducedMotion ? 1 : 0)).current;
+  const headerScale = useRef(new Animated.Value(isReducedMotion ? 1 : 0.92)).current;
+  const heroOpacity = useRef(new Animated.Value(isReducedMotion ? 1 : 0)).current;
+  const heroTranslateY = useRef(new Animated.Value(isReducedMotion ? 0 : 16)).current;
+  const chipScale = useRef(new Animated.Value(isReducedMotion ? 1 : 0.8)).current;
+  const chipOpacity = useRef(new Animated.Value(isReducedMotion ? 1 : 0)).current;
+  const footerOpacity = useRef(new Animated.Value(isReducedMotion ? 1 : 0)).current;
+
+  useEffect(() => {
+    if (isReducedMotion) return;
+
+    Animated.stagger(140, [
+      // 1. Header (Logo + Tagline)
+      Animated.parallel([
+        Animated.timing(headerOpacity, {
+          toValue: 1,
+          duration: 600,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.spring(headerScale, {
+          toValue: 1,
+          friction: 7,
+          tension: 40,
+          useNativeDriver: true,
+        }),
+      ]),
+      // 2. Hero copy
+      Animated.parallel([
+        Animated.timing(heroOpacity, {
+          toValue: 1,
+          duration: 650,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(heroTranslateY, {
+          toValue: 0,
+          duration: 650,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]),
+      // 3. Service chips
+      Animated.parallel([
+        Animated.spring(chipScale, {
+          toValue: 1,
+          friction: 6,
+          tension: 45,
+          useNativeDriver: true,
+        }),
+        Animated.timing(chipOpacity, {
+          toValue: 1,
+          duration: 500,
+          useNativeDriver: true,
+        }),
+      ]),
+      // 4. Footer CTA button
+      Animated.timing(footerOpacity, {
+        toValue: 1,
+        duration: 550,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [isReducedMotion, headerOpacity, headerScale, heroOpacity, heroTranslateY, chipScale, chipOpacity, footerOpacity]);
 
   const services = [
     { icon: "food", label: "Food" },
@@ -36,13 +106,29 @@ export default function Splash() {
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.content}>
           {/* Header */}
-          <View style={styles.header}>
+          <Animated.View
+            style={[
+              styles.header,
+              {
+                opacity: headerOpacity,
+                transform: [{ scale: headerScale }],
+              },
+            ]}
+          >
             <Logo light size={26} />
             <Text style={styles.tagline}>MOVE · EAT · SHOP · DELIVER</Text>
-          </View>
+          </Animated.View>
 
           {/* Main Hero Copy (Figma .splash-main) */}
-          <View style={styles.splashMain}>
+          <Animated.View
+            style={[
+              styles.splashMain,
+              {
+                opacity: heroOpacity,
+                transform: [{ translateY: heroTranslateY }],
+              },
+            ]}
+          >
             <Text style={styles.eyebrow}>ONE APP. EVERYDAY POSSIBILITIES.</Text>
             <Text style={styles.title}>
               Everything <Text style={styles.titleHighlight}>you need</Text>
@@ -53,7 +139,15 @@ export default function Splash() {
             </Text>
 
             {/* Service Chips Row (Figma .service-row) */}
-            <View style={styles.serviceRow}>
+            <Animated.View
+              style={[
+                styles.serviceRow,
+                {
+                  opacity: chipOpacity,
+                  transform: [{ scale: chipScale }],
+                },
+              ]}
+            >
               {services.map(({ icon, label }) => (
                 <View key={label} style={styles.serviceItem}>
                   <View style={styles.serviceCircle}>
@@ -62,11 +156,18 @@ export default function Splash() {
                   <Text style={styles.serviceLabel}>{label}</Text>
                 </View>
               ))}
-            </View>
-          </View>
+            </Animated.View>
+          </Animated.View>
 
           {/* Footer CTA */}
-          <View style={styles.footer}>
+          <Animated.View
+            style={[
+              styles.footer,
+              {
+                opacity: footerOpacity,
+              },
+            ]}
+          >
             <Button
               onPress={() => push({ name: "phone" })}
               accentColor={colors.accent}
@@ -75,7 +176,7 @@ export default function Splash() {
               <Icon name="arrow" size={20} color="#ffffff" />
             </Button>
             <Text style={styles.photoCredit}>RoadRider SuperApp</Text>
-          </View>
+          </Animated.View>
         </View>
       </SafeAreaView>
     </ImageBackground>

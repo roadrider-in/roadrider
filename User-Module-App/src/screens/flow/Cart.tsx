@@ -9,6 +9,7 @@ import {
   Modal,
   Pressable,
   StatusBar,
+  Image,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import FlowHeader from "../../components/FlowHeader";
@@ -16,25 +17,20 @@ import BillSummary from "../../components/BillSummary";
 import Button from "../../components/Button";
 import Icon from "../../components/Icon";
 import LocationRows from "../../components/LocationRows";
+import GlobalLocationHeader from "../../components/GlobalLocationHeader";
 import { PACKAGE_TYPES, RIDE_OPTIONS, type Service } from "../../data/demo";
 import { rupees, validatePromo } from "../../lib/pricing";
 import { useNav } from "../../navigation/Navigation";
 import { useApp } from "../../state/AppState";
 import { colors } from "../../theme/tokens";
+import { useI18n } from "../../lib/i18n";
+import { getServiceTheme } from "../../theme/themes";
+import LoginPromptModal from "../../components/LoginPromptModal";
+import CouponBottomSheet from "../../components/CouponBottomSheet";
 
 interface CartProps {
   service: Service;
 }
-
-const SERVICE_THEMES: Record<
-  Service,
-  { accent: string; accentSoft: string }
-> = {
-  food: { accent: "#c84b31", accentSoft: "#f8e7e2" },
-  rides: { accent: "#3983f7", accentSoft: "rgba(57, 131, 247, 0.16)" },
-  grocery: { accent: "#318454", accentSoft: "#e5f3e8" },
-  courier: { accent: "#ef801f", accentSoft: "#fff0de" },
-};
 
 export default function Cart({ service }: CartProps) {
   const { push } = useNav();
@@ -47,10 +43,13 @@ export default function Cart({ service }: CartProps) {
     setCourier,
     setRide,
   } = useApp();
+  const { t } = useI18n();
   const [showPromoModal, setShowPromoModal] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
   const [promoInput, setPromoInput] = useState("");
 
-  const theme = SERVICE_THEMES[service] ?? SERVICE_THEMES.food;
+  const serviceTheme = getServiceTheme(service);
+  const theme = { accent: serviceTheme.primary, accentSoft: serviceTheme.primarySoft };
   const rawTotal = itemTotal(service);
   const fallbackCourierPrice =
     PACKAGE_TYPES.find((p) => p.id === state.courier.packageId)?.price ?? 139;
@@ -132,9 +131,8 @@ export default function Cart({ service }: CartProps) {
       showToast("Your cart is empty. Please add items.");
       return;
     }
-    if (!state.authenticated && !state.isGuest) {
-      showToast("Please sign in to proceed with your order");
-      push({ name: "phone" });
+    if (!state.authenticated) {
+      setShowLoginModal(true);
       return;
     }
     if (service === "rides") {
@@ -163,6 +161,13 @@ export default function Cart({ service }: CartProps) {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
+        {/* Delivering To bar for Food / Grocery */}
+        {(service === "food" || service === "grocery") && (
+          <View style={styles.deliveringToCard}>
+            <GlobalLocationHeader />
+          </View>
+        )}
+
         {/* Cart Line Items */}
         {service === "food" || service === "grocery" ? (
           <>
@@ -189,11 +194,19 @@ export default function Cart({ service }: CartProps) {
                       { backgroundColor: theme.accentSoft },
                     ]}
                   >
-                    <Icon
-                      name={service === "food" ? "food" : "bag"}
-                      size={20}
-                      color={theme.accent}
-                    />
+                    {line.photo ? (
+                      <Image
+                        source={{ uri: line.photo }}
+                        style={styles.cartThumbImage}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <Icon
+                        name={service === "food" ? "food" : "bag"}
+                        size={20}
+                        color={theme.accent}
+                      />
+                    )}
                   </View>
                   <View style={styles.itemDetails}>
                     <Text style={styles.itemName}>{line.name}</Text>
@@ -444,63 +457,24 @@ export default function Cart({ service }: CartProps) {
         <BillSummary service={service} />
       </ScrollView>
 
-      {/* Promo Modal Sheet */}
-      <Modal
+      {/* Premium One-Tap Coupon Bottom Sheet */}
+      <CouponBottomSheet
         visible={showPromoModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowPromoModal(false)}
-      >
-        <Pressable
-          style={styles.modalOverlay}
-          onPress={() => setShowPromoModal(false)}
-        >
-          <Pressable
-            style={styles.promoDialog}
-            onPress={(e) => e.stopPropagation()}
-          >
-            <View style={styles.dialogHeader}>
-              <Text style={styles.dialogTitle}>Enter Coupon Code</Text>
-              <TouchableOpacity onPress={() => setShowPromoModal(false)}>
-                <Text style={styles.dialogCancelText}>Cancel</Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.promoInputRow}>
-              <TextInput
-                placeholder="e.g. WELCOME50"
-                placeholderTextColor={colors.muted}
-                value={promoInput}
-                onChangeText={(text) => setPromoInput(text.toUpperCase())}
-                autoCapitalize="characters"
-                style={styles.promoTextInput}
-              />
-              <TouchableOpacity
-                onPress={handleApplyPromoCode}
-                style={[styles.promoApplyBtn, { backgroundColor: theme.accent }]}
-              >
-                <Text style={styles.promoApplyBtnText}>Apply</Text>
-              </TouchableOpacity>
-            </View>
-
-            {Boolean(appliedPromo) && (
-              <TouchableOpacity
-                onPress={handleRemovePromo}
-                style={styles.removePromoBtn}
-              >
-                <Text style={styles.removePromoText}>
-                  Remove current code ({appliedPromo})
-                </Text>
-              </TouchableOpacity>
-            )}
-
-            <Text style={styles.promoHint}>
-              Available for you: <Text style={styles.boldText}>WELCOME50</Text>{" "}
-              (50% off first order)
-            </Text>
-          </Pressable>
-        </Pressable>
-      </Modal>
+        onClose={() => setShowPromoModal(false)}
+        service={service}
+        storeId={service === "food" ? state.carts.food.storeId : undefined}
+        cartTotal={total}
+        appliedPromo={appliedPromo}
+        usedPromos={state.usedPromos}
+        onApply={(code) => {
+          applyPromo(service, code);
+          showToast(`Coupon ${code} applied successfully!`);
+        }}
+        onRemove={() => {
+          applyPromo(service, null);
+          showToast("Coupon removed.");
+        }}
+      />
 
       {/* Bottom Continue Action */}
       <SafeAreaView style={styles.bottomBar} edges={["bottom"]}>
@@ -514,11 +488,39 @@ export default function Cart({ service }: CartProps) {
             : "Continue"}
         </Button>
       </SafeAreaView>
+      {/* Login Prompt Modal for Guest Users attempting checkout */}
+      <LoginPromptModal
+        visible={showLoginModal}
+        title={t("login_required_title", "Login to continue")}
+        subtitle={t(
+          "login_required_sub",
+          "Create an account or log in to place your order and track live delivery."
+        )}
+        onClose={() => setShowLoginModal(false)}
+        onLogin={() => {
+          setShowLoginModal(false);
+          push({ name: "phone" });
+        }}
+      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  deliveringToCard: {
+    backgroundColor: "#ffffff",
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "rgba(0, 0, 0, 0.06)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 1,
+  },
   serviceCartCard: {
     marginBottom: 8,
   },
@@ -603,6 +605,11 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
+    overflow: "hidden",
+  },
+  cartThumbImage: {
+    width: "100%",
+    height: "100%",
   },
   itemDetails: {
     flex: 1,

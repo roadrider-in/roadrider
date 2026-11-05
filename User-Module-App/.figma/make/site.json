@@ -1,0 +1,10 @@
+{
+  "description": "Streamline your daily needs with a super-app for food delivery, rides, grocery shopping, and courier services, all in one convenient platform.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

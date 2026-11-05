@@ -6,11 +6,18 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "scheme": "roadrider",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#171514"
+    },
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.roadrider.userapp",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "RoadRider requires your location to display nearby food, rides, groceries, and delivery couriers."
+        "NSLocationWhenInUseUsageDescription": "RoadRider requires your location to display nearby food, rides, groceries, and delivery couriers.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "RoadRider requires your location to provide accurate delivery tracking and live ride estimates."
       }
     },
     "android": {
@@ -24,7 +31,10 @@
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "ACCESS_COARSE_LOCATION",
-        "ACCESS_FINE_LOCATION"
+        "ACCESS_FINE_LOCATION",
+        "CALL_PHONE",
+        "POST_NOTIFICATIONS",
+        "ACCESS_NETWORK_STATE"
       ]
     },
     "web": {

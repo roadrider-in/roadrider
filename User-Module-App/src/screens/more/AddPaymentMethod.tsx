@@ -18,7 +18,7 @@ import { colors, radii } from "../../theme/tokens";
 
 export default function AddPaymentMethod() {
   const { back } = useNav();
-  const { showToast } = useApp();
+  const { state, showToast } = useApp();
 
   const [methodType, setMethodType] = useState<"upi" | "card">("upi");
 
@@ -28,7 +28,7 @@ export default function AddPaymentMethod() {
 
   // Card fields
   const [cardNumber, setCardNumber] = useState("");
-  const [cardHolder, setCardHolder] = useState("Arjun Khanna");
+  const [cardHolder, setCardHolder] = useState(state.profile.name || "");
   const [expiry, setExpiry] = useState("");
   const [cvv, setCvv] = useState("");
   const [cardError, setCardError] = useState("");
@@ -203,7 +203,7 @@ export default function AddPaymentMethod() {
               NAME ON CARD
             </Text>
             <TextInput
-              placeholder="Arjun Khanna"
+              placeholder="Full Name on Card"
               placeholderTextColor={colors.muted}
               value={cardHolder}
               onChangeText={setCardHolder}

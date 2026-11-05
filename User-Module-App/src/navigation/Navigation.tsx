@@ -15,6 +15,7 @@ export type { TabName, PlacesMode, RouteSpec };
 
 export const TAB_NAMES: TabName[] = [
   "home",
+  "rides",
   "navcart",
   "orders",
   "account",

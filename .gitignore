@@ -26,3 +26,17 @@ coverage/
 
 # IDE
 .idea/
+
+# Supabase local state and temporary secrets
+**/supabase/.temp/
+**/supabase/.branches/
+
+# Local APK test builds
+*.apk
+
+# Supabase local state and temporary secrets
+**/supabase/.temp/
+**/supabase/.branches/
+
+# Local APK test builds
+*.apk

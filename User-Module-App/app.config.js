@@ -31,13 +31,29 @@ module.exports = ({ config }) => {
         ...(googleMapsApiKey ? { googleMaps: { apiKey: googleMapsApiKey } } : {}),
       },
     },
+    ios: {
+      ...config.ios,
+      config: {
+        ...config.ios?.config,
+        ...(googleMapsApiKey ? { googleMapsApiKey } : {}),
+      },
+    },
     plugins: [
       ...(config.plugins || []),
-      "expo-location",
+      [
+        "expo-location",
+        {
+          locationAlwaysAndWhenInUsePermission:
+            "RoadRider requires your location to provide accurate courier pickup and delivery tracking.",
+          locationWhenInUsePermission:
+            "RoadRider requires your location to display nearby couriers and road routes.",
+        },
+      ],
       [
         "react-native-maps",
         {
           androidGoogleMapsApiKey: googleMapsApiKey,
+          iosGoogleMapsApiKey: googleMapsApiKey,
         },
       ],
     ],

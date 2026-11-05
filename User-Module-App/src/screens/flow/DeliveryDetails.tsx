@@ -12,14 +12,17 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Location from "expo-location";
 import FlowHeader from "../../components/FlowHeader";
-import MapArt from "../../components/MapArt";
+import GoogleMap from "../../components/GoogleMap";
 import Button from "../../components/Button";
 import Icon from "../../components/Icon";
-import { RESTAURANTS, GROCERY_HUB, type Service, type Place } from "../../data/demo";
+import { type Service, type Place } from "../../data/demo";
+import { fetchStoreById } from "../../lib/supabaseData";
 import { PRESET_COORDS, DEFAULT_CENTER, type LatLng } from "../../lib/googleMaps";
 import { useNav } from "../../navigation/Navigation";
 import { useApp } from "../../state/AppState";
 import { colors } from "../../theme/tokens";
+import { getServiceTheme } from "../../theme/themes";
+import { useRouteCalculation } from "../../hooks/useRouteCalculation";
 
 interface DeliveryDetailsProps {
   service: Service;
@@ -27,139 +30,74 @@ interface DeliveryDetailsProps {
 
 export default function DeliveryDetails({ service }: DeliveryDetailsProps) {
   const { push } = useNav();
+  const theme = getServiceTheme(service);
   const { state, setDefaultPlace, addPlace, showToast } = useApp();
 
-  const [detectingGps, setDetectingGps] = useState(false);
-  const [gpsPlace, setGpsPlace] = useState<Place | null>(null);
   const [selectedPlaceId, setSelectedPlaceId] = useState<string>(
-    service === "food" ? "current-gps" : state.defaultPlaceId
+    state.defaultPlaceId || (state.places[0]?.id ?? "")
   );
-  const [saveForFutureOrders, setSaveForFutureOrders] = useState(true);
-
-  // Fetch current GPS location on mount
-  useEffect(() => {
-    let isMounted = true;
-    const fetchGps = async () => {
-      setDetectingGps(true);
-      try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== "granted") {
-          if (isMounted) setDetectingGps(false);
-          return;
-        }
-
-        const pos = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
-
-        const { latitude, longitude } = pos.coords;
-        let label = "Current Location (GPS)";
-        let area = "Lucknow, Uttar Pradesh";
-        let line = `${latitude.toFixed(4)}° N, ${longitude.toFixed(4)}° E`;
-
-        try {
-          const rev = await Location.reverseGeocodeAsync({ latitude, longitude });
-          if (rev && rev.length > 0) {
-            const r = rev[0];
-            label = r.name || r.street || "Current Location";
-            area = [r.district, r.city || "Lucknow"].filter(Boolean).join(", ");
-            line = [r.street, r.district, r.city].filter(Boolean).join(", ") || line;
-          }
-        } catch {}
-
-        if (isMounted) {
-          const detected: Place = {
-            id: "current-gps",
-            label,
-            line,
-            area,
-            icon: "pin",
-            coords: { lat: latitude, lng: longitude },
-          };
-          setGpsPlace(detected);
-          setDetectingGps(false);
-        }
-      } catch (err) {
-        if (isMounted) setDetectingGps(false);
-      }
-    };
-
-    fetchGps();
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
 
   const currentCart =
     service === "food" || service === "grocery" ? state.carts[service] : null;
-  const store =
-    service === "food"
-      ? RESTAURANTS.find((r) => r.id === currentCart?.storeId) || RESTAURANTS[0]
-      : service === "grocery"
-      ? GROCERY_HUB
-      : null;
+
+  const [activeStore, setActiveStore] = useState<{
+    name: string;
+    coords: { lat: number; lng: number };
+    etaShort?: string;
+  } | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    if ((service === "food" || service === "grocery") && currentCart?.storeId) {
+      fetchStoreById(currentCart.storeId).then((res) => {
+        if (!isMounted) return;
+        if (res.data) {
+          setActiveStore({
+            name: res.data.name,
+            coords: res.data.coords,
+            etaShort: res.data.etaShort,
+          });
+        }
+      });
+    }
+    return () => {
+      isMounted = false;
+    };
+  }, [service, currentCart?.storeId]);
 
   const activePlace =
-    selectedPlaceId === "current-gps" && gpsPlace
-      ? gpsPlace
-      : state.places.find((p) => p.id === selectedPlaceId) ??
-        state.places[0];
+    state.places.find((p) => p.id === selectedPlaceId) ??
+    state.places[0];
 
-  const originCoords: LatLng = store
-    ? { ...store.coords, label: store.name }
+  const originCoords: LatLng = activeStore
+    ? { ...activeStore.coords, label: activeStore.name }
     : PRESET_COORDS.restaurant;
   const destCoords: LatLng = activePlace?.coords
     ? { ...activePlace.coords, label: activePlace.label }
     : DEFAULT_CENTER;
 
+  // Real route calculation via Google Routes API
+  const { route } = useRouteCalculation(originCoords, destCoords);
+  const polylineCoords = route?.coordinates || [];
+  const distanceKm = route?.distanceKm;
+  const durationMins = route?.durationMinutes;
+
   const handleSelectPlace = (id: string) => {
     setSelectedPlaceId(id);
-    if (id !== "current-gps") {
-      setDefaultPlace(id);
-    }
+    setDefaultPlace(id);
   };
 
   const handleDeliverHere = () => {
-    if (selectedPlaceId === "current-gps" && gpsPlace) {
-      if (saveForFutureOrders) {
-        const saved = addPlace({
-          label:
-            gpsPlace.label === "Current Location (GPS)"
-              ? "Current Location"
-              : gpsPlace.label,
-          line: gpsPlace.line,
-          area: gpsPlace.area,
-          icon: "pin",
-          coords: gpsPlace.coords,
-        });
-        setDefaultPlace(saved.id);
-        showToast("📍 Address saved for future orders");
-      } else {
-        const temp = addPlace({
-          label: gpsPlace.label,
-          line: gpsPlace.line,
-          area: gpsPlace.area,
-          icon: "pin",
-          coords: gpsPlace.coords,
-        });
-        setDefaultPlace(temp.id);
-        showToast("📍 Current location confirmed");
-      }
-      push({ name: "payment", service });
+    const chosenPlace = state.places.find((p) => p.id === selectedPlaceId) ?? state.places[0];
+    if (!chosenPlace || !chosenPlace.coords?.lat || !chosenPlace.coords?.lng) {
+      showToast("Please select a delivery address with valid coordinates.");
+      push({ name: "places", mode: "delivery" });
       return;
     }
 
-    if (!state.defaultPlaceId && state.places.length === 0) {
-      showToast("Please add a delivery address.");
-      push({ name: "addAddress", mode: "delivery" });
-      return;
-    }
-
+    setDefaultPlace(chosenPlace.id);
     push({ name: "payment", service });
   };
-
-  const isCurrentGpsSelected = selectedPlaceId === "current-gps";
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
@@ -171,92 +109,60 @@ export default function DeliveryDetails({ service }: DeliveryDetailsProps) {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Map Mini Banner matching Figma */}
+        {/* Real Google Map Preview with Road Route */}
         <View style={styles.mapMini}>
-          <MapArt
+          <GoogleMap
             origin={originCoords}
             destination={destCoords}
-            etaText={
-              service === "food" && store && "etaShort" in store
-                ? (store as any).etaShort
-                : "20 min"
-            }
+            routeCoordinates={polylineCoords.length > 0 ? polylineCoords : undefined}
+            showRoute
+            theme="default"
+            interactive={false}
           />
+          <View style={styles.etaOverlayBadge}>
+            <Icon name="clock" size={13} color="#FFFFFF" />
+            <Text style={styles.etaOverlayText}>
+              {durationMins ? `${durationMins} mins` : activeStore?.etaShort || "20-25 mins"}
+              {distanceKm ? ` · ${distanceKm.toFixed(1)} km` : ""}
+            </Text>
+          </View>
         </View>
 
         {/* Section Heading matching Figma */}
         <View style={styles.sectionHeading}>
           <Text style={styles.headingTitle}>Choose an address</Text>
-          <TouchableOpacity
-            onPress={() => push({ name: "addAddress", mode: "delivery" })}
-          >
-            <Text style={styles.addNewBtn}>+ Add new</Text>
-          </TouchableOpacity>
+          <View style={{ flexDirection: "row", gap: 12 }}>
+            <TouchableOpacity
+              onPress={() => push({ name: "places", mode: "delivery" })}
+            >
+              <Text style={styles.addNewBtn}>🔍 Search address</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => push({ name: "addAddress", mode: "delivery" })}
+            >
+              <Text style={styles.addNewBtn}>+ Add new</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Address Selection Cards matching Figma */}
         <View style={styles.cardsContainer}>
-          {/* Option: User's Current Location (GPS) */}
-          <View
-            style={[
-              styles.addressCard,
-              isCurrentGpsSelected && styles.addressCardSelected,
-            ]}
-          >
+          {state.places.length === 0 && (
             <TouchableOpacity
               activeOpacity={0.8}
-              onPress={() => handleSelectPlace("current-gps")}
-              style={styles.cardRow}
+              onPress={() => push({ name: "places", mode: "delivery" })}
+              style={styles.emptyAddressCard}
             >
-              <View style={styles.cardIconBox}>
-                {detectingGps ? (
-                  <ActivityIndicator size="small" color="#c84b31" />
-                ) : (
-                  <Icon name="pin" size={18} color="#c84b31" />
-                )}
-              </View>
-
-              <View style={styles.cardDetails}>
-                <View style={styles.titleTagRow}>
-                  <Text style={styles.cardTitle}>
-                    {gpsPlace ? gpsPlace.label : "Current Location (GPS)"}
-                  </Text>
-                  <View style={styles.badge}>
-                    <Text style={styles.badgeText}>GPS</Text>
-                  </View>
-                </View>
-                <Text style={styles.cardSubtitle} numberOfLines={1}>
-                  {gpsPlace
-                    ? gpsPlace.line || gpsPlace.area
-                    : detectingGps
-                    ? "Detecting live GPS location..."
-                    : "Tap to use device coordinates"}
+              <Icon name="search" size={20} color="#c84b31" />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cardTitle}>No saved addresses</Text>
+                <Text style={styles.cardSubtitle}>
+                  Tap to search and select your delivery address
                 </Text>
               </View>
-
-              <View
-                style={[
-                  styles.radioDot,
-                  isCurrentGpsSelected && styles.radioDotSelected,
-                ]}
-              />
+              <Icon name="arrow" size={16} color="#c84b31" />
             </TouchableOpacity>
-
-            {isCurrentGpsSelected && (
-              <View style={styles.futureSaveRow}>
-                <View style={styles.futureSaveTextCol}>
-                  <Text style={styles.futureSaveTitle}>Save for future orders</Text>
-                  <Text style={styles.futureSaveSub}>Save to profile</Text>
-                </View>
-                <Switch
-                  value={saveForFutureOrders}
-                  onValueChange={setSaveForFutureOrders}
-                  trackColor={{ false: "#d1d5db", true: "#c84b31" }}
-                  thumbColor="#ffffff"
-                />
-              </View>
-            )}
-          </View>
+          )}
 
           {/* Saved Addresses List */}
           {state.places.map((place) => {
@@ -275,9 +181,16 @@ export default function DeliveryDetails({ service }: DeliveryDetailsProps) {
                   <Icon name={place.icon} size={18} color="#c84b31" />
                 </View>
                 <View style={styles.cardDetails}>
-                  <Text style={styles.cardTitle}>{place.label}</Text>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <Text style={styles.cardTitle}>{place.label}</Text>
+                    {place.coords && (
+                      <Text style={{ fontSize: 9.5, color: "#288153", fontWeight: "700" }}>
+                        📍 Exact Pin ({place.coords.lat.toFixed(3)}, {place.coords.lng.toFixed(3)})
+                      </Text>
+                    )}
+                  </View>
                   <Text style={styles.cardSubtitle} numberOfLines={1}>
-                    {place.line}
+                    {place.line} · {place.area}
                   </Text>
                 </View>
                 <View
@@ -294,7 +207,7 @@ export default function DeliveryDetails({ service }: DeliveryDetailsProps) {
 
       {/* Bottom Deliver Here CTA */}
       <SafeAreaView style={styles.bottomBar} edges={["bottom"]}>
-        <Button onPress={handleDeliverHere}>Deliver here</Button>
+        <Button accentColor={theme.primary} onPress={handleDeliverHere}>Deliver here</Button>
       </SafeAreaView>
     </SafeAreaView>
   );
@@ -312,8 +225,32 @@ const styles = StyleSheet.create({
     paddingBottom: 95,
   },
   mapMini: {
-    height: 160,
+    height: 180,
     width: "100%",
+    position: "relative",
+    overflow: "hidden",
+  },
+  etaOverlayBadge: {
+    position: "absolute",
+    bottom: 12,
+    right: 14,
+    backgroundColor: "rgba(23, 21, 20, 0.85)",
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    shadowColor: "#000",
+    shadowOpacity: 0.15,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  etaOverlayText: {
+    color: "#FFFFFF",
+    fontSize: 12,
+    fontWeight: "700",
   },
   sectionHeading: {
     flexDirection: "row",
@@ -421,6 +358,18 @@ const styles = StyleSheet.create({
   futureSaveSub: {
     fontSize: 8,
     color: "#77716e",
+  },
+  emptyAddressCard: {
+    backgroundColor: "#ffffff",
+    borderWidth: 1.5,
+    borderColor: "#c84b31",
+    borderStyle: "dashed",
+    borderRadius: 14,
+    padding: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 12,
   },
   bottomBar: {
     position: "absolute",
